@@ -1,6 +1,8 @@
 use pyo3::exceptions::{PyIOError, PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use rusqlite::types::{Value as SqlValue, ValueRef};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
@@ -23,6 +25,12 @@ enum DbError {
     TypeMismatch { field: String, expected: String },
     #[error("io error: {0}")]
     Io(String),
+    #[error("table `{0}` already exists")]
+    TableExists(String),
+    #[error("field `{0}` is not part of the schema")]
+    UnknownField(String),
+    #[error("invalid identifier `{0}`")]
+    InvalidIdentifier(String),
 }
 
 type DbResult<T> = Result<T, DbError>;
@@ -65,6 +73,16 @@ impl FieldType {
         }
     }
 
+    fn sql_label(&self) -> &'static str {
+        match self {
+            Self::String => "TEXT",
+            Self::Integer => "INTEGER",
+            Self::Float => "REAL",
+            Self::Boolean => "INTEGER",
+            Self::Json => "TEXT",
+        }
+    }
+
     fn matches(&self, value: &Value) -> bool {
         match self {
             Self::String => value.is_string(),
@@ -99,6 +117,12 @@ impl Table {
         payload: &Map<String, Value>,
         updating: Option<u64>,
     ) -> DbResult<()> {
+        for field in payload.keys() {
+            if !self.schema.contains_key(field) {
+                return Err(DbError::UnknownField(field.clone()));
+            }
+        }
+
         for (field, def) in &self.schema {
             if def.required && !payload.contains_key(field) {
                 return Err(DbError::MissingField(field.clone()));
@@ -169,8 +193,12 @@ impl Engine {
         }
     }
 
-    fn create_table(&mut self, name: &str, schema: HashMap<String, FieldDef>) {
+    fn create_table(&mut self, name: &str, schema: HashMap<String, FieldDef>) -> DbResult<()> {
+        if self.tables.contains_key(name) {
+            return Err(DbError::TableExists(name.to_string()));
+        }
         self.tables.insert(name.to_string(), Table::new(schema));
+        Ok(())
     }
 
     fn table(&self, name: &str) -> DbResult<&Table> {
@@ -270,14 +298,63 @@ fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
     })
 }
 
+fn validate_identifier(identifier: &str) -> DbResult<()> {
+    if identifier.is_empty()
+        || !identifier
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(DbError::InvalidIdentifier(identifier.to_string()));
+    }
+    Ok(())
+}
+
+fn json_to_sql(value: &Value) -> SqlValue {
+    match value {
+        Value::Null => SqlValue::Null,
+        Value::Bool(flag) => SqlValue::Integer(i64::from(*flag)),
+        Value::Number(number) => {
+            if let Some(int) = number.as_i64() {
+                SqlValue::Integer(int)
+            } else if let Some(uint) = number.as_u64() {
+                SqlValue::Integer(uint as i64)
+            } else {
+                SqlValue::Real(number.as_f64().unwrap_or_default())
+            }
+        }
+        Value::String(text) => SqlValue::Text(text.clone()),
+        Value::Array(_) | Value::Object(_) => SqlValue::Text(value.to_string()),
+    }
+}
+
+fn sql_ref_to_json(value: ValueRef<'_>) -> Value {
+    match value {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(int) => Value::Number(int.into()),
+        ValueRef::Real(float) => serde_json::Number::from_f64(float)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        ValueRef::Text(bytes) => {
+            let text = String::from_utf8_lossy(bytes).to_string();
+            serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text))
+        }
+        ValueRef::Blob(bytes) => {
+            let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            Value::String(hex)
+        }
+    }
+}
+
 fn convert_db_error(error: DbError) -> PyErr {
     match error {
         DbError::MissingTable(_) | DbError::MissingField(_) | DbError::MissingRecord(_) => {
             PyKeyError::new_err(error.to_string())
         }
-        DbError::UniqueViolation(_) | DbError::TypeMismatch { .. } => {
-            PyValueError::new_err(error.to_string())
-        }
+        DbError::UniqueViolation(_)
+        | DbError::TypeMismatch { .. }
+        | DbError::TableExists(_)
+        | DbError::UnknownField(_)
+        | DbError::InvalidIdentifier(_) => PyValueError::new_err(error.to_string()),
         DbError::Io(_) => PyIOError::new_err(error.to_string()),
     }
 }
@@ -381,9 +458,11 @@ impl Database {
     }
 
     fn create_table(&mut self, name: String, schema: Bound<'_, PyDict>) -> PyResult<()> {
+        validate_identifier(&name).map_err(convert_db_error)?;
         let mut native_schema = HashMap::new();
         for (field, definition) in schema.iter() {
             let field_name = field.extract::<String>()?;
+            validate_identifier(&field_name).map_err(convert_db_error)?;
             let definition = definition.downcast::<PyDict>()?;
             let raw_type = definition
                 .get_item("type")?
@@ -413,12 +492,16 @@ impl Database {
             );
         }
 
-        self.engine.create_table(&name, native_schema);
+        self.engine
+            .create_table(&name, native_schema)
+            .map_err(convert_db_error)?;
         self.persist()?;
         Ok(())
     }
 
     fn create_index(&mut self, table: String, field: String) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
+        validate_identifier(&field).map_err(convert_db_error)?;
         let target = self.engine.table_mut(&table).map_err(convert_db_error)?;
         if !target.schema.contains_key(&field) {
             return Err(PyKeyError::new_err(format!(
@@ -433,6 +516,7 @@ impl Database {
     }
 
     fn insert(&mut self, table: String, payload: Bound<'_, PyDict>) -> PyResult<u64> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let mut data = Map::new();
         for (key, value) in payload.iter() {
             data.insert(key.extract::<String>()?, py_to_json(value)?);
@@ -449,6 +533,7 @@ impl Database {
     }
 
     fn update(&mut self, table: String, record_id: u64, patch: Bound<'_, PyDict>) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let mut patch_data = Map::new();
         for (key, value) in patch.iter() {
             patch_data.insert(key.extract::<String>()?, py_to_json(value)?);
@@ -465,6 +550,7 @@ impl Database {
     }
 
     fn delete(&mut self, table: String, record_id: u64) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let removed = self
             .engine
             .table_mut(&table)
@@ -479,6 +565,7 @@ impl Database {
     }
 
     fn fetch_all(&self, py: Python<'_>, table: String) -> PyResult<Vec<Record>> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let target = self.engine.table(&table).map_err(convert_db_error)?;
         let mut out = Vec::new();
         for (id, data) in &target.records {
@@ -491,6 +578,7 @@ impl Database {
     }
 
     fn query(&self, py: Python<'_>, query: PyRef<'_, Query>) -> PyResult<Vec<Record>> {
+        validate_identifier(&query.table).map_err(convert_db_error)?;
         let table = self.engine.table(&query.table).map_err(convert_db_error)?;
         let mut rows: Vec<(u64, Map<String, Value>)> = table
             .records
@@ -563,6 +651,7 @@ impl Database {
     }
 
     fn export_csv(&self, table: String, destination: String) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let target = self.engine.table(&table).map_err(convert_db_error)?;
         let mut writer = csv::Writer::from_path(Path::new(&destination))
             .map_err(|err| PyIOError::new_err(err.to_string()))?;
@@ -591,6 +680,183 @@ impl Database {
         writer
             .flush()
             .map_err(|err| PyIOError::new_err(err.to_string()))?;
+        Ok(())
+    }
+
+    fn export_jsonl(&self, table: String, destination: String) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
+        let target = self.engine.table(&table).map_err(convert_db_error)?;
+        let mut rows: Vec<(u64, &Map<String, Value>)> =
+            target.records.iter().map(|(id, row)| (*id, row)).collect();
+        rows.sort_by_key(|(id, _)| *id);
+
+        let mut output = String::new();
+        for (id, row) in rows {
+            let mut record = Map::new();
+            record.insert("id".to_string(), Value::Number(id.into()));
+            for (key, value) in row {
+                record.insert(key.clone(), value.clone());
+            }
+            output.push_str(
+                &serde_json::to_string(&Value::Object(record))
+                    .map_err(|err| PyRuntimeError::new_err(err.to_string()))?,
+            );
+            output.push('\n');
+        }
+
+        fs::write(destination, output).map_err(|err| PyIOError::new_err(err.to_string()))?;
+        Ok(())
+    }
+
+    fn import_jsonl(&mut self, table: String, source: String) -> PyResult<usize> {
+        validate_identifier(&table).map_err(convert_db_error)?;
+        let raw = fs::read_to_string(source).map_err(|err| PyIOError::new_err(err.to_string()))?;
+        let target = self.engine.table_mut(&table).map_err(convert_db_error)?;
+        let mut imported = 0usize;
+
+        for (line_number, line) in raw.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let value: Value = serde_json::from_str(line).map_err(|err| {
+                PyValueError::new_err(format!("invalid JSONL at line {}: {err}", line_number + 1))
+            })?;
+            let mut payload = value
+                .as_object()
+                .cloned()
+                .ok_or_else(|| PyValueError::new_err("JSONL row must be an object"))?;
+            payload.remove("id");
+
+            target.insert(payload).map_err(convert_db_error)?;
+            imported += 1;
+        }
+
+        self.persist()?;
+        Ok(imported)
+    }
+
+    #[pyo3(signature = (table, source, source_table=None))]
+    fn import_sqlite(
+        &mut self,
+        table: String,
+        source: String,
+        source_table: Option<String>,
+    ) -> PyResult<usize> {
+        validate_identifier(&table).map_err(convert_db_error)?;
+        if let Some(source_name) = &source_table {
+            validate_identifier(source_name).map_err(convert_db_error)?;
+        }
+
+        let source_name = source_table.unwrap_or_else(|| table.clone());
+        let conn = Connection::open(source).map_err(|err| PyIOError::new_err(err.to_string()))?;
+        let target = self.engine.table_mut(&table).map_err(convert_db_error)?;
+
+        let mut statement = conn
+            .prepare(&format!("SELECT * FROM \"{source_name}\""))
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        let column_names: Vec<String> = statement
+            .column_names()
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+
+        let mut rows = statement
+            .query([])
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        let mut imported = 0usize;
+
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?
+        {
+            let mut payload = Map::new();
+            for (index, name) in column_names.iter().enumerate() {
+                if name == "id" {
+                    continue;
+                }
+                if !target.schema.contains_key(name) {
+                    continue;
+                }
+                let value_ref = row
+                    .get_ref(index)
+                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                payload.insert(name.clone(), sql_ref_to_json(value_ref));
+            }
+            target.insert(payload).map_err(convert_db_error)?;
+            imported += 1;
+        }
+
+        self.persist()?;
+        Ok(imported)
+    }
+
+    fn export_sqlite(&self, table: String, destination: String) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
+        let target = self.engine.table(&table).map_err(convert_db_error)?;
+        let mut conn =
+            Connection::open(destination).map_err(|err| PyIOError::new_err(err.to_string()))?;
+
+        let mut fields: Vec<(String, FieldDef)> = target
+            .schema
+            .iter()
+            .map(|(name, def)| (name.clone(), def.clone()))
+            .collect();
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let columns = fields
+            .iter()
+            .map(|(name, def)| format!("\"{name}\" {}", def.field_type.sql_label()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        conn.execute(
+            &format!("CREATE TABLE IF NOT EXISTS \"{table}\" (id INTEGER PRIMARY KEY, {columns})"),
+            [],
+        )
+        .map_err(|err| PyIOError::new_err(err.to_string()))?;
+        conn.execute(&format!("DELETE FROM \"{table}\""), [])
+            .map_err(|err| PyIOError::new_err(err.to_string()))?;
+
+        let field_names: Vec<String> = fields.into_iter().map(|(name, _)| name).collect();
+        let quoted_fields = field_names
+            .iter()
+            .map(|name| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let placeholders = (0..=field_names.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let statement =
+            format!("INSERT INTO \"{table}\" (id, {quoted_fields}) VALUES ({placeholders})");
+
+        let mut rows: Vec<(u64, &Map<String, Value>)> =
+            target.records.iter().map(|(id, row)| (*id, row)).collect();
+        rows.sort_by_key(|(id, _)| *id);
+
+        let transaction = conn
+            .transaction()
+            .map_err(|err| PyIOError::new_err(err.to_string()))?;
+        {
+            let mut insert = transaction
+                .prepare(&statement)
+                .map_err(|err| PyIOError::new_err(err.to_string()))?;
+            for (id, row) in rows {
+                let mut params = Vec::with_capacity(field_names.len() + 1);
+                params.push(SqlValue::Integer(id as i64));
+                for field in &field_names {
+                    let value = row.get(field).unwrap_or(&Value::Null);
+                    params.push(json_to_sql(value));
+                }
+                insert
+                    .execute(rusqlite::params_from_iter(params))
+                    .map_err(|err| PyIOError::new_err(err.to_string()))?;
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|err| PyIOError::new_err(err.to_string()))?;
+
         Ok(())
     }
 
@@ -645,6 +911,7 @@ fn _core(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
 
     fn sample_schema() -> HashMap<String, FieldDef> {
         HashMap::from([
@@ -687,5 +954,83 @@ mod tests {
 
         let error = table.insert(duplicate).expect_err("duplicate should fail");
         assert!(matches!(error, DbError::UniqueViolation(_)));
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let mut table = Table::new(sample_schema());
+        let mut payload = Map::new();
+        payload.insert("name".to_string(), Value::String("Ana".to_string()));
+        payload.insert(
+            "email".to_string(),
+            Value::String("ana@example.com".to_string()),
+        );
+        payload.insert("role".to_string(), Value::String("admin".to_string()));
+
+        let error = table
+            .insert(payload)
+            .expect_err("unknown field should fail");
+        assert!(matches!(error, DbError::UnknownField(_)));
+    }
+
+    #[test]
+    fn exports_and_imports_sqlite() {
+        let mut source_engine = Engine::new();
+        source_engine
+            .create_table("users", sample_schema())
+            .expect("table creation should work");
+        let users = source_engine
+            .table_mut("users")
+            .expect("users table should exist");
+
+        let mut payload = Map::new();
+        payload.insert("name".to_string(), Value::String("Ana".to_string()));
+        payload.insert(
+            "email".to_string(),
+            Value::String("ana@example.com".to_string()),
+        );
+        users.insert(payload).expect("insert should succeed");
+
+        let database = Database {
+            engine: source_engine,
+            storage_path: None,
+            transaction_snapshot: None,
+        };
+
+        let sqlite_file = NamedTempFile::new().expect("sqlite temp file");
+        database
+            .export_sqlite(
+                "users".to_string(),
+                sqlite_file.path().to_string_lossy().to_string(),
+            )
+            .expect("sqlite export should succeed");
+
+        let mut target_engine = Engine::new();
+        target_engine
+            .create_table("users", sample_schema())
+            .expect("table creation should work");
+        let mut target_db = Database {
+            engine: target_engine,
+            storage_path: None,
+            transaction_snapshot: None,
+        };
+
+        let imported = target_db
+            .import_sqlite(
+                "users".to_string(),
+                sqlite_file.path().to_string_lossy().to_string(),
+                None,
+            )
+            .expect("import should work");
+        assert_eq!(imported, 1);
+        assert_eq!(
+            target_db
+                .engine
+                .table("users")
+                .expect("users table")
+                .records
+                .len(),
+            1
+        );
     }
 }

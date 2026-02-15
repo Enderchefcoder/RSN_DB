@@ -40,7 +40,7 @@ RSN DB is designed for scripts, tools, automation flows, and prototypes where yo
   </tr>
   <tr>
     <td><strong>Data interoperability</strong></td>
-    <td>CSV export for downstream analytics or BI tooling.</td>
+    <td>CSV, JSONL, and SQLite import/export for downstream analytics and migrations.</td>
   </tr>
 </table>
 
@@ -69,6 +69,13 @@ maturin develop
 ```bash
 cargo test
 python -m pytest
+```
+
+### 4) Build wheel/sdist for PyPI-style installation
+
+```bash
+maturin build --release
+python -m pip install target/wheels/rsn_db-*.whl
 ```
 
 ---
@@ -118,11 +125,18 @@ print(db.execute_sql("COUNT users"))
 
 ### Create table + query records
 
+*Caption: Creating schema, inserting records, then querying active users from the terminal workflow.*
 ![RSN DB quick usage demo](https://raw.githubusercontent.com/charmbracelet/vhs/main/examples/demo.gif)
 
 ### Transaction safety workflow
 
+*Caption: A rollback/commit transaction flow to keep writes safe while iterating in a terminal session.*
 ![RSN DB transaction workflow demo](https://raw.githubusercontent.com/asciinema/agg/main/demo/demo.gif)
+
+### Cross-database conversion workflow
+
+*Caption: Exporting from RSN DB into SQLite/JSONL and importing rows back into another table.*
+![RSN DB conversion workflow demo](https://raw.githubusercontent.com/charmbracelet/vhs/main/examples/demo.gif)
 
 ---
 
@@ -139,6 +153,10 @@ print(db.execute_sql("COUNT users"))
 - `query(query: Query) -> list[Record]`
 - `execute_sql(sql: str) -> Any` (`SHOW`, `COUNT <table>`)
 - `export_csv(table, destination)`
+- `export_jsonl(table, destination)`
+- `import_jsonl(table, source) -> int`
+- `export_sqlite(table, destination)`
+- `import_sqlite(table, source, source_table=None) -> int`
 - `begin_transaction()`, `rollback()`, `commit()`
 - `save()`
 
@@ -163,6 +181,25 @@ db = Database("./data/prod.json")
 # autosaved after mutating operations
 db.save()  # explicit save if needed
 ```
+
+## Conversion Example (SQLite + JSONL)
+
+```python
+db.export_sqlite("users", "./out/users.sqlite")
+db.export_jsonl("users", "./out/users.jsonl")
+
+db.create_table("users_migrated", {
+    "name": {"type": "string", "required": True},
+    "email": {"type": "string", "required": True, "unique": True},
+    "age": {"type": "integer"},
+})
+
+db.import_sqlite("users_migrated", "./out/users.sqlite", "users")
+```
+
+## PyPI Publishing Guide
+
+The project already uses a PyPI-ready `pyproject.toml` with maturin. See `documentation/pypi_publish.md` for a complete release flow and the exact `twine` upload commands.
 
 ---
 
