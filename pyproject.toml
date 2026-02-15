@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rsn-db"
+version = "0.1.0"
+description = "Rust-powered embedded database for Python"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "RSN DB Contributors" }]
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Rust",
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "rsn_db._core"
+features = ["pyo3/extension-module"]
