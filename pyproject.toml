@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "rsn-db"
+name = "rsn_db"
 version = "0.1.0"
 description = "Rust-powered embedded database for Python"
 readme = "README.md"
