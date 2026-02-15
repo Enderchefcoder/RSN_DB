@@ -1,0 +1,19 @@
+[package]
+name = "rsn_db"
+version = "0.1.0"
+edition = "2021"
+description = "Hybrid document/graph/key-value in-memory database engine exposed to Python via maturin"
+license = "MIT"
+
+[lib]
+name = "rsn_db"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module", "abi3-py39"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+pretty_assertions = "1"
