@@ -99,3 +99,47 @@ def test_jsonl_and_sqlite_roundtrip(tmp_path):
     rows = db.fetch_all("users_from_sqlite")
     assert len(rows) == 1
     assert rows[0].data["name"] == "Ana"
+
+
+def test_command_safety_and_discovery_features(tmp_path):
+    db = Database(str(tmp_path / "state.json"), mode="friendly")
+    db.create_table(
+        "users",
+        {
+            "name": {"type": "string", "required": True},
+            "email": {"type": "string", "required": True, "unique": True},
+        },
+    )
+
+    with pytest.raises(ValueError, match="COUNT requires"):
+        db.execute_sql("COUNT")
+
+    with pytest.raises(ValueError, match="ALIAS format"):
+        db.execute_sql("ALIAS shortcut")
+
+    fields = db.execute_sql("DESCRIBE users")
+    assert fields == ["email", "name"]
+
+    db.execute_sql("TABLES")
+    db.execute_sql("COUNT users")
+    history = db.execute_sql("HISTORY")
+    assert history[0] == "COUNT users"
+    assert "TABLES" in history
+
+
+def test_path_traversal_rejected(tmp_path):
+    db = Database(str(tmp_path / "state.json"))
+    db.create_table(
+        "users",
+        {
+            "name": {"type": "string", "required": True},
+            "email": {"type": "string", "required": True, "unique": True},
+        },
+    )
+    db.insert("users", {"name": "Ana", "email": "ana@example.com"})
+
+    with pytest.raises(ValueError, match="Potential path traversal"):
+        db.export_jsonl("users", "../unsafe.jsonl")
+
+    with pytest.raises(ValueError, match="Potential path traversal"):
+        db.import_sqlite("users", "../unsafe.sqlite", "users")
