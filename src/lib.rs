@@ -660,8 +660,10 @@ impl Database {
                     Value::Number(n) => {
                         if let Some(i) = n.as_i64() {
                             SqlValue::Integer(i)
+                        } else if let Some(f) = n.as_f64() {
+                            SqlValue::Real(f)
                         } else {
-                            SqlValue::Real(n.as_f64().unwrap())
+                            SqlValue::Null
                         }
                     }
                     Value::String(s) => SqlValue::Text(s.clone()),
