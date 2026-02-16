@@ -64,7 +64,7 @@ impl Personality {
         match self.mode {
             Mode::Professional => String::new(),
             Mode::Friendly => {
-                if c == 0 {
+                if c <= 1 {
                     "".to_string()
                 } else {
                     "No command entered. Type HELP if you need examples.".to_string()
