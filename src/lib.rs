@@ -15,10 +15,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 use thiserror::Error;
 use zstd::stream::{decode_all, encode_all};
 
@@ -493,85 +492,7 @@ impl Database {
     }
 
     fn execute_sql(&mut self, py: Python<'_>, sql: String) -> PyResult<PyObject> {
-        if self.batch_mode && !["COMMIT", "ROLLBACK"].contains(&sql.to_ascii_uppercase().as_str()) {
-            self.batch_ops.push(sql.clone());
-            return Ok("".into_py(py));
-        }
-
-        self.command_history.push(sql.clone());
-        let toks: Vec<&str> = sql.split_whitespace().collect();
-        if toks.is_empty() {
-            let empty_count = self
-                .command_history
-                .iter()
-                .filter(|s| s.trim().is_empty())
-                .count() as u32;
-            return Ok(self.personality.empty_input(empty_count).into_py(py));
-        }
-
-        match toks[0].to_ascii_uppercase().as_str() {
-            "SHOW" | "TABLES" => Ok(self.engine.tables.keys().cloned().collect::<Vec<_>>().into_py(py)),
-            "COUNT" => {
-                if toks.len() < 2 {
-                    return Err(PyValueError::new_err("COUNT requires a table name"));
-                }
-                Ok(self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?.records.len().into_py(py))
-            }
-            "DESCRIBE" => {
-                if toks.len() < 2 {
-                    return Err(PyValueError::new_err("DESCRIBE requires a table name"));
-                }
-                let table = self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?;
-                let mut fields = table.schema.keys().cloned().collect::<Vec<_>>();
-                fields.sort();
-                Ok(fields.into_py(py))
-            }
-            "HISTORY" => {
-                let recent = self
-                    .command_history
-                    .iter()
-                    .rev()
-                    .filter(|cmd| !cmd.trim().is_empty())
-                    .take(10)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                Ok(recent.into_py(py))
-            }
-            "BATCH" => {
-                self.batch_mode = true;
-                self.batch_ops.clear();
-                Ok("Batch mode started.".into_py(py))
-            }
-            "COMMIT" => {
-                self.batch_mode = false;
-                let ops: Vec<_> = self.batch_ops.drain(..).collect();
-                for operation in &ops {
-                    self.execute_sql(py, operation.clone())?;
-                }
-                Ok(self.personality.batch_committed(ops.len()).into_py(py))
-            }
-            "ALIAS" => {
-                if toks.len() < 4 || toks[2] != "=" {
-                    return Err(PyValueError::new_err("ALIAS format: ALIAS <name> = <command>"));
-                }
-                let alias_name = toks[1].to_ascii_lowercase();
-                validate_identifier(&alias_name).map_err(convert_db_error)?;
-                self.engine.aliases.insert(alias_name, toks[3..].join(" "));
-                Ok("Alias created.".into_py(py))
-            }
-            "FIND" if toks.join(" ").contains("older than Bob") => Ok("⚙ Translating...\n  Interpreted as: READ users WHERE age > (SELECT age FROM users WHERE name = \"Bob\") AND has_outbound_edge(\"FOLLOWS\")\nIs that it?\nY for yes, N or blank for no\nr>y\n╭── Results ────────────────────╮\n│  • Alice (30)                 │\n│  • Charlie (35)               │\n╰───────────────────────────────╯".into_py(py)),
-            "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => Ok(self.personality.why_mean().into_py(py)),
-            "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
-            _ => {
-                if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
-                    return self.execute_sql(py, translated.clone());
-                }
-                if toks[0] == "DELTE" {
-                    return Err(PyValueError::new_err(self.personality.typo_suggestion("DELTE", "DELETE")));
-                }
-                Err(PyRuntimeError::new_err(self.personality.error("unknown command")))
-            }
-        }
+        self.execute_sql_internal(py, sql, &mut HashSet::new(), 0)
     }
 
     fn export_jsonl(&self, table: String, dest: String) -> PyResult<()> {
@@ -614,6 +535,7 @@ impl Database {
         self.persist()?;
         Ok(n)
     }
+
     fn export_sqlite(&self, table: String, dest: String) -> PyResult<()> {
         let t = self
             .engine
@@ -735,10 +657,122 @@ impl Database {
 }
 
 impl Database {
+    fn execute_sql_internal(
+        &mut self,
+        py: Python<'_>,
+        sql: String,
+        alias_stack: &mut HashSet<String>,
+        alias_depth: usize,
+    ) -> PyResult<PyObject> {
+        const MAX_ALIAS_EXPANSION_DEPTH: usize = 32;
+        if self.batch_mode && !["COMMIT", "ROLLBACK"].contains(&sql.to_ascii_uppercase().as_str()) {
+            self.batch_ops.push(sql.clone());
+            return Ok("".into_py(py));
+        }
+
+        self.command_history.push(sql.clone());
+        let toks: Vec<&str> = sql.split_whitespace().collect();
+        if toks.is_empty() {
+            let empty_count = self
+                .command_history
+                .iter()
+                .filter(|s| s.trim().is_empty())
+                .count() as u32;
+            return Ok(self.personality.empty_input(empty_count).into_py(py));
+        }
+
+        match toks[0].to_ascii_uppercase().as_str() {
+            "SHOW" | "TABLES" => Ok(self.engine.tables.keys().cloned().collect::<Vec<_>>().into_py(py)),
+            "COUNT" => {
+                if toks.len() < 2 {
+                    return Err(PyValueError::new_err("COUNT requires a table name"));
+                }
+                Ok(self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?.records.len().into_py(py))
+            }
+            "DESCRIBE" => {
+                if toks.len() < 2 {
+                    return Err(PyValueError::new_err("DESCRIBE requires a table name"));
+                }
+                let table = self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?;
+                let mut fields = table.schema.keys().cloned().collect::<Vec<_>>();
+                fields.sort();
+                Ok(fields.into_py(py))
+            }
+            "HISTORY" => {
+                let recent = self
+                    .command_history
+                    .iter()
+                    .rev()
+                    .filter(|cmd| !cmd.trim().is_empty())
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                Ok(recent.into_py(py))
+            }
+            "BATCH" => {
+                self.batch_mode = true;
+                self.batch_ops.clear();
+                Ok("Batch mode started.".into_py(py))
+            }
+            "COMMIT" => {
+                self.batch_mode = false;
+                let ops: Vec<_> = self.batch_ops.drain(..).collect();
+                for operation in &ops {
+                    self.execute_sql_internal(py, operation.clone(), &mut HashSet::new(), 0)?;
+                }
+                Ok(self.personality.batch_committed(ops.len()).into_py(py))
+            }
+            "ALIAS" => {
+                if toks.len() < 4 || toks[2] != "=" {
+                    return Err(PyValueError::new_err("ALIAS format: ALIAS <name> = <command>"));
+                }
+                let alias_name = toks[1].to_ascii_lowercase();
+                validate_identifier(&alias_name).map_err(convert_db_error)?;
+                self.engine.aliases.insert(alias_name, toks[3..].join(" "));
+                Ok("Alias created.".into_py(py))
+            }
+            "FIND" if toks.join(" ").contains("older than Bob") => Ok("⚙ Translating...\n  Interpreted as: READ users WHERE age > (SELECT age FROM users WHERE name = \"Bob\") AND has_outbound_edge(\"FOLLOWS\")\nIs that it?\nY for yes, N or blank for no\nr>y\n╭── Results ────────────────────╮\n│  • Alice (30)                 │\n│  • Charlie (35)               │\n╰───────────────────────────────╯".into_py(py)),
+            "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => Ok(self.personality.why_mean().into_py(py)),
+            "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
+            "HELP" if toks.len() > 1 && toks[1].eq_ignore_ascii_case("OPTIMIZE") => {
+                Ok(self.personality.help_optimize("users").into_py(py))
+            }
+            _ => {
+                let alias_name = toks[0].to_ascii_lowercase();
+                if let Some(translated) = self.engine.aliases.get(&alias_name).cloned() {
+                    if alias_depth >= MAX_ALIAS_EXPANSION_DEPTH {
+                        return Err(PyRuntimeError::new_err("alias expansion exceeded depth limit"));
+                    }
+                    if !alias_stack.insert(alias_name.clone()) {
+                        return Err(PyRuntimeError::new_err(format!(
+                            "circular alias detected for `{}`",
+                            alias_name
+                        )));
+                    }
+                    let result = self.execute_sql_internal(
+                        py,
+                        translated,
+                        alias_stack,
+                        alias_depth + 1,
+                    );
+                    alias_stack.remove(&alias_name);
+                    return result;
+                }
+                if toks[0] == "DELTE" {
+                    return Err(PyValueError::new_err(self.personality.typo_suggestion("DELTE", "DELETE")));
+                }
+                if toks[0] == "EXPLIN" {
+                    return Err(PyValueError::new_err(self.personality.explain_typo("EXPLIN", "EXPLAIN")));
+                }
+                Err(PyRuntimeError::new_err(self.personality.error("unknown command")))
+            }
+        }
+    }
+
     fn load(&mut self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
             if p.exists() {
-                let mut b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                let b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
                 if b.len() < 32 {
                     return Err(PyValueError::new_err("corrupted file"));
                 }
@@ -816,7 +850,10 @@ fn sanitize_path(raw: &str) -> PyResult<PathBuf> {
 
     let path = PathBuf::from(raw);
     for component in path.components() {
-        if matches!(component, Component::ParentDir | Component::Prefix(_)) {
+        if matches!(
+            component,
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir
+        ) {
             return Err(PyValueError::new_err("Potential path traversal detected."));
         }
     }
@@ -872,8 +909,10 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
                 i.into_py(py)
             } else if let Some(u) = n.as_u64() {
                 u.into_py(py)
+            } else if let Some(float_value) = n.as_f64() {
+                float_value.into_py(py)
             } else {
-                n.as_f64().unwrap().into_py(py)
+                n.to_string().into_py(py)
             }
         }
         Value::String(s) => s.into_py(py),
@@ -895,11 +934,10 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
 }
 fn value_cmp(l: &Value, r: &Value) -> Ordering {
     match (l, r) {
-        (Value::Number(a), Value::Number(b)) => a
-            .as_f64()
-            .unwrap()
-            .partial_cmp(&b.as_f64().unwrap())
-            .unwrap_or(Ordering::Equal),
+        (Value::Number(a), Value::Number(b)) => match (a.as_f64(), b.as_f64()) {
+            (Some(left), Some(right)) => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
+            _ => a.to_string().cmp(&b.to_string()),
+        },
         (Value::String(a), Value::String(b)) => a.cmp(b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         _ => Ordering::Equal,

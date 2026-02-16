@@ -143,3 +143,38 @@ def test_path_traversal_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="Potential path traversal"):
         db.import_sqlite("users", "../unsafe.sqlite", "users")
+
+
+def test_absolute_paths_rejected(tmp_path):
+    db = Database(str(tmp_path / "state.json"))
+    db.create_table(
+        "users",
+        {
+            "name": {"type": "string", "required": True},
+            "email": {"type": "string", "required": True, "unique": True},
+        },
+    )
+    db.insert("users", {"name": "Ana", "email": "ana@example.com"})
+
+    with pytest.raises(ValueError, match="Potential path traversal"):
+        db.export_jsonl("users", "/tmp/unsafe.jsonl")
+
+
+def test_alias_cycle_detection(tmp_path):
+    db = Database(str(tmp_path / "state.json"))
+    db.execute_sql("ALIAS a = b")
+    db.execute_sql("ALIAS b = a")
+
+    with pytest.raises(RuntimeError, match="circular alias"):
+        db.execute_sql("a")
+
+
+def test_snarky_help_and_typo_personality(tmp_path):
+    db = Database(str(tmp_path / "state.json"), mode="snarky")
+
+    optimize_help = db.execute_sql("HELP OPTIMIZE")
+    assert "OPTIMIZE <table>" in optimize_help
+    assert "life choices" in optimize_help
+
+    with pytest.raises(ValueError, match="Unknown command: 'EXPLIN'"):
+        db.execute_sql("EXPLIN READ users")
