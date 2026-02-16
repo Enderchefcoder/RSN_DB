@@ -11,10 +11,10 @@
 ## Features
 
 - **Insane Safety & Security**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
-- **Dynamic Personality**: Choose your experience—Professional, Friendly, or **Snarky**.
+- **Dynamic Personality**: Choose your experience—Professional, Friendly, or **Snarky** with richer reactions, achievements, and batch summaries.
 - **Interactive CLI**: Just type `rsn` and get to work.
 - **Smart Data Handling**: Constraints, Aliases, Batch Operations, and Smart Type Coercion.
-- **NL Translation**: Talk to your data with the `FIND` command.
+- **Command UX Features**: Talk to your data with `FIND`, inspect schemas with `DESCRIBE`, and review recent activity via `HISTORY`.
 
 ---
 
@@ -102,7 +102,7 @@ db.insert("users", {"name": "Alice"})
 RSN DB takes your data seriously (even if it doesn't take *you* seriously).
 - **Encryption**: AES-256-GCM keeps your data private.
 - **Integrity**: SHA-256 checksums prevent tampering.
-- **Protection**: Built-in path traversal protection.
+- **Protection**: Built-in path traversal protection plus stricter command validation to avoid parser crashes.
 
 ---
 
