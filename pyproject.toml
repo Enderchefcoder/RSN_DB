@@ -15,6 +15,9 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 
+[project.scripts]
+rsn = "rsn_db.cli:main"
+
 [tool.maturin]
 python-source = "python"
 module-name = "rsn_db._core"
