@@ -493,6 +493,17 @@ impl Database {
     }
 
     fn execute_sql(&mut self, py: Python<'_>, sql: String) -> PyResult<PyObject> {
+        let mut alias_chain = Vec::new();
+        self.execute_sql_internal(py, sql, &mut alias_chain, 0)
+    }
+
+    fn execute_sql_internal(
+        &mut self,
+        py: Python<'_>,
+        sql: String,
+        alias_chain: &mut Vec<String>,
+        depth: usize,
+    ) -> PyResult<PyObject> {
         if self.batch_mode && !["COMMIT", "ROLLBACK"].contains(&sql.to_ascii_uppercase().as_str()) {
             self.batch_ops.push(sql.clone());
             return Ok("".into_py(py));
@@ -546,7 +557,7 @@ impl Database {
                 self.batch_mode = false;
                 let ops: Vec<_> = self.batch_ops.drain(..).collect();
                 for operation in &ops {
-                    self.execute_sql(py, operation.clone())?;
+                    self.execute_sql_internal(py, operation.clone(), &mut Vec::new(), 0)?;
                 }
                 Ok(self.personality.batch_committed(ops.len()).into_py(py))
             }
@@ -559,17 +570,46 @@ impl Database {
                 self.engine.aliases.insert(alias_name, toks[3..].join(" "));
                 Ok("Alias created.".into_py(py))
             }
+            "HELP" => {
+                if toks.len() >= 2 {
+                    if let Some(topic) = self.personality.help_topic(toks[1]) {
+                        return Ok(topic.into_py(py));
+                    }
+                }
+                Ok("Use HELP <command> for details.".into_py(py))
+            }
             "FIND" if toks.join(" ").contains("older than Bob") => Ok("⚙ Translating...\n  Interpreted as: READ users WHERE age > (SELECT age FROM users WHERE name = \"Bob\") AND has_outbound_edge(\"FOLLOWS\")\nIs that it?\nY for yes, N or blank for no\nr>y\n╭── Results ────────────────────╮\n│  • Alice (30)                 │\n│  • Charlie (35)               │\n╰───────────────────────────────╯".into_py(py)),
             "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => Ok(self.personality.why_mean().into_py(py)),
             "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
             _ => {
-                if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
-                    return self.execute_sql(py, translated.clone());
+                let alias_name = toks[0].to_ascii_lowercase();
+                if let Some(translated) = self.engine.aliases.get(&alias_name).cloned() {
+                    if depth >= 32 {
+                        return Err(PyRuntimeError::new_err(
+                            "Alias expansion limit reached (possible recursive alias).",
+                        ));
+                    }
+                    if alias_chain.contains(&alias_name) {
+                        alias_chain.push(alias_name.clone());
+                        return Err(PyRuntimeError::new_err(format!(
+                            "Circular alias detected: {}",
+                            alias_chain.join(" -> ")
+                        )));
+                    }
+                    alias_chain.push(alias_name);
+                    let result = self.execute_sql_internal(py, translated, alias_chain, depth + 1);
+                    alias_chain.pop();
+                    return result;
                 }
                 if toks[0] == "DELTE" {
                     return Err(PyValueError::new_err(self.personality.typo_suggestion("DELTE", "DELETE")));
                 }
-                Err(PyRuntimeError::new_err(self.personality.error("unknown command")))
+                if let Some(suggestion) = self.personality.suggest_command(toks[0]) {
+                    return Err(PyValueError::new_err(
+                        self.personality.unknown_command(toks[0], Some(suggestion)),
+                    ));
+                }
+                Err(PyRuntimeError::new_err(self.personality.unknown_command(toks[0], None)))
             }
         }
     }
@@ -816,7 +856,10 @@ fn sanitize_path(raw: &str) -> PyResult<PathBuf> {
 
     let path = PathBuf::from(raw);
     for component in path.components() {
-        if matches!(component, Component::ParentDir | Component::Prefix(_)) {
+        if matches!(
+            component,
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir
+        ) {
             return Err(PyValueError::new_err("Potential path traversal detected."));
         }
     }
@@ -872,8 +915,10 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
                 i.into_py(py)
             } else if let Some(u) = n.as_u64() {
                 u.into_py(py)
+            } else if let Some(f) = n.as_f64() {
+                f.into_py(py)
             } else {
-                n.as_f64().unwrap().into_py(py)
+                n.to_string().into_py(py)
             }
         }
         Value::String(s) => s.into_py(py),
@@ -895,16 +940,60 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
 }
 fn value_cmp(l: &Value, r: &Value) -> Ordering {
     match (l, r) {
-        (Value::Number(a), Value::Number(b)) => a
-            .as_f64()
-            .unwrap()
-            .partial_cmp(&b.as_f64().unwrap())
-            .unwrap_or(Ordering::Equal),
+        (Value::Number(a), Value::Number(b)) => {
+            if let (Some(a_i64), Some(b_i64)) = (a.as_i64(), b.as_i64()) {
+                return a_i64.cmp(&b_i64);
+            }
+            if let (Some(a_u64), Some(b_u64)) = (a.as_u64(), b.as_u64()) {
+                return a_u64.cmp(&b_u64);
+            }
+            match (a.as_f64(), b.as_f64()) {
+                (Some(a_f64), Some(b_f64)) => a_f64.partial_cmp(&b_f64).unwrap_or(Ordering::Equal),
+                _ => a.to_string().cmp(&b.to_string()),
+            }
+        }
         (Value::String(a), Value::String(b)) => a.cmp(b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         _ => Ordering::Equal,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_path_rejects_absolute_and_parent_components() {
+        assert!(sanitize_path("/etc/passwd").is_err());
+        assert!(sanitize_path("../secrets.txt").is_err());
+        assert!(sanitize_path("safe/path.txt").is_ok());
+    }
+
+    #[test]
+    fn value_cmp_handles_non_f64_numbers_without_panicking() {
+        let left = Value::Number(serde_json::Number::from(u64::MAX));
+        let right = Value::Number(serde_json::Number::from(1u64));
+        assert_eq!(value_cmp(&left, &right), Ordering::Greater);
+    }
+
+    #[test]
+    fn execute_sql_detects_circular_aliases() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let mut db = Database::new(None, None, true, "snarky").expect("db should initialize");
+            db.execute_sql(py, "ALIAS a = b".to_string())
+                .expect("first alias should work");
+            db.execute_sql(py, "ALIAS b = a".to_string())
+                .expect("second alias should work");
+
+            let err = db
+                .execute_sql(py, "a".to_string())
+                .expect_err("circular alias must fail");
+            assert!(err.to_string().contains("Circular alias detected"));
+        });
+    }
+}
+
 fn convert_db_error(e: DbError) -> PyErr {
     match e {
         DbError::MissingTable(_) | DbError::MissingField(_) | DbError::MissingRecord(_) => {
