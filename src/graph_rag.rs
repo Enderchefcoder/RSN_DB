@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use sha2::{Digest, Sha256};
 use petgraph::graph::UnGraph;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextChunk {
@@ -101,7 +101,11 @@ impl GraphRagEngine {
         }
 
         if !current_chunk.is_empty() {
-            let id = format!("{:x}", Sha256::digest(format!("{}_{}", source, count).as_bytes()))[..12].to_string();
+            let id = format!(
+                "{:x}",
+                Sha256::digest(format!("{}_{}", source, count).as_bytes())
+            )[..12]
+                .to_string();
             chunks.push(TextChunk {
                 id,
                 text: current_chunk,
@@ -113,7 +117,9 @@ impl GraphRagEngine {
 
     fn extract_entities(&self, text: &str) -> Vec<Entity> {
         let mut entities = HashMap::new();
-        let re = Regex::new(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b").unwrap();
+        let Ok(re) = Regex::new(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b") else {
+            return Vec::new();
+        };
         for mat in re.find_iter(text) {
             let name = mat.as_str().to_string();
             if name.len() > 2 {
@@ -170,7 +176,10 @@ impl GraphRagEngine {
             for (word, count) in word_counts {
                 let tf = count as f32 / words.len() as f32;
                 let idf = ((num_docs as f32) / (*doc_counts.get(*word).unwrap_or(&1) as f32)).ln();
-                self.tfidf_index.entry(word.to_string()).or_insert_with(HashMap::new).insert(cid.clone(), tf * idf);
+                self.tfidf_index
+                    .entry(word.to_string())
+                    .or_insert_with(HashMap::new)
+                    .insert(cid.clone(), tf * idf);
             }
         }
     }
@@ -193,7 +202,9 @@ impl GraphRagEngine {
         let mut partition = Vec::new();
         let mut visited = HashSet::new();
         for node in graph.node_indices() {
-            if visited.contains(&node) { continue; }
+            if visited.contains(&node) {
+                continue;
+            }
             let mut component = Vec::new();
             let mut stack = vec![node];
             while let Some(n) = stack.pop() {
@@ -207,10 +218,27 @@ impl GraphRagEngine {
             partition.push(component);
         }
 
-        self.data.communities = partition.into_iter().enumerate().map(|(i, entities)| {
-            let summary = format!("Community of {} entities including {}.", entities.len(), entities.iter().take(3).cloned().collect::<Vec<_>>().join(", "));
-            Community { id: i, entities, summary }
-        }).collect();
+        self.data.communities = partition
+            .into_iter()
+            .enumerate()
+            .map(|(i, entities)| {
+                let summary = format!(
+                    "Community of {} entities including {}.",
+                    entities.len(),
+                    entities
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                Community {
+                    id: i,
+                    entities,
+                    summary,
+                }
+            })
+            .collect();
     }
 
     pub fn query(&self, query: &str) -> String {
@@ -236,12 +264,19 @@ impl GraphRagEngine {
         let mut response = format!("--- GraphRAG Results ---\n");
         for (cid, _) in sorted_chunks.iter().take(3) {
             if let Some(chunk) = self.data.chunks.get(*cid) {
-                response.push_str(&format!("\n[Chunk ID: {} | Source: {}]\n{}\n", chunk.id, chunk.source, chunk.text));
+                response.push_str(&format!(
+                    "\n[Chunk ID: {} | Source: {}]\n{}\n",
+                    chunk.id, chunk.source, chunk.text
+                ));
             }
         }
 
         for comm in &self.data.communities {
-            if comm.entities.iter().any(|e| query.to_lowercase().contains(&e.to_lowercase())) {
+            if comm
+                .entities
+                .iter()
+                .any(|e| query.to_lowercase().contains(&e.to_lowercase()))
+            {
                 response.push_str(&format!("\n[Community Context: {}]\n", comm.summary));
             }
         }

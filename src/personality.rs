@@ -162,7 +162,11 @@ impl Personality {
             Mode::Friendly => format!("✗ Oops! {}.", err),
             Mode::Snarky => {
                 let lower = err.to_lowercase();
-                let snark = if lower.contains("table") && (lower.contains("exist") || lower.contains("found") || lower.contains("missing")) {
+                let snark = if lower.contains("table")
+                    && (lower.contains("exist")
+                        || lower.contains("found")
+                        || lower.contains("missing"))
+                {
                     self.pick(&[
                         "You literally just looked at the table list. It's not there.",
                         "Do you expect ghosts in here? No such table.",
@@ -190,7 +194,11 @@ impl Personality {
                         "Is the table in the room with us right now?",
                         "Stop gaslighting the database.",
                     ])
-                } else if lower.contains("syntax") || lower.contains("parse") || lower.contains("token") || lower.contains("expected") {
+                } else if lower.contains("syntax")
+                    || lower.contains("parse")
+                    || lower.contains("token")
+                    || lower.contains("expected")
+                {
                     self.pick(&[
                         "This isn't poetry. Syntax matters.",
                         "I'm a database, not a cryptic puzzle solver.",
@@ -247,7 +255,11 @@ impl Personality {
                         "Be original.",
                         "Integrity check failed. Moral integrity also suspect.",
                     ])
-                } else if lower.contains("type") || lower.contains("mismatch") || lower.contains("integer") || lower.contains("string") {
+                } else if lower.contains("type")
+                    || lower.contains("mismatch")
+                    || lower.contains("integer")
+                    || lower.contains("string")
+                {
                     self.pick(&[
                         "I store numbers in number fields. Crazy concept, I know.",
                         "Strings are not Integers. It's not a suggestion.",
@@ -299,7 +311,11 @@ impl Personality {
                         "Please use words found in the dictionary.",
                         "Command unrecognized. User unrecognized.",
                     ])
-                } else if lower.contains("permission") || lower.contains("denied") || lower.contains("root") || lower.contains("sudo") {
+                } else if lower.contains("permission")
+                    || lower.contains("denied")
+                    || lower.contains("root")
+                    || lower.contains("sudo")
+                {
                     self.pick(&[
                         "You have no power here.",
                         "Sudo won't save you.",
@@ -322,7 +338,10 @@ impl Personality {
                         "Security violation logged.",
                         "Do not touch that.",
                     ])
-                } else if lower.contains("delete") || lower.contains("drop") || lower.contains("remove") {
+                } else if lower.contains("delete")
+                    || lower.contains("drop")
+                    || lower.contains("remove")
+                {
                     self.pick(&[
                         "Destructive actions require competence. You lack it.",
                         "I saved you from yourself. You're welcome.",
@@ -345,7 +364,10 @@ impl Personality {
                         "Drop blocked. Butterfingers.",
                         "Think about what you've done.",
                     ])
-                } else if lower.contains("timeout") || lower.contains("slow") || lower.contains("lock") {
+                } else if lower.contains("timeout")
+                    || lower.contains("slow")
+                    || lower.contains("lock")
+                {
                     self.pick(&[
                         "I'm ignoring you. It's a timeout.",
                         "Deadlock detected. You and I are stuck here.",
@@ -413,10 +435,7 @@ impl Personality {
     pub fn typo_suggestion(&self, bad: &str, good: &str) -> String {
         match self.mode {
             Mode::Professional => format!("Unknown: {}. Did you mean {}?", bad, good),
-            Mode::Friendly => format!(
-                "I couldn't find '{}'. I think you meant '{}'?",
-                bad, good
-            ),
+            Mode::Friendly => format!("I couldn't find '{}'. I think you meant '{}'?", bad, good),
             Mode::Snarky => {
                 let snark = self.pick(&[
                     "Fat fingers?",
@@ -460,7 +479,10 @@ impl Personality {
                     "It's spelled like it sounds.",
                     "Try Hooked on Phonics.",
                 ]);
-                format!("Unknown command '{}'. Did you mean '{}'? \n  ({})", bad, good, snark)
+                format!(
+                    "Unknown command '{}'. Did you mean '{}'? \n  ({})",
+                    bad, good, snark
+                )
             }
         }
     }
@@ -677,7 +699,10 @@ impl Personality {
     pub fn graph_ingested(&self, word_count: usize) -> String {
         match self.mode {
             Mode::Professional => format!("Ingested {} words.", word_count),
-            Mode::Friendly => format!("Graph built! Processed {} words into the knowledge base.", word_count),
+            Mode::Friendly => format!(
+                "Graph built! Processed {} words into the knowledge base.",
+                word_count
+            ),
             Mode::Snarky => {
                 let snark = self.pick(&[
                     "I read it all. Most of it was fluff, but I'll remember the important bits.",
@@ -695,8 +720,18 @@ impl Personality {
 
     pub fn graph_query_result(&self, has_results: bool) -> String {
         match self.mode {
-            Mode::Professional => if has_results { "Results found." } else { "No results." }.to_string(),
-            Mode::Friendly => if has_results { "Here's what I found in the graph!" } else { "Sorry, I couldn't find anything relevant in the graph." }.to_string(),
+            Mode::Professional => if has_results {
+                "Results found."
+            } else {
+                "No results."
+            }
+            .to_string(),
+            Mode::Friendly => if has_results {
+                "Here's what I found in the graph!"
+            } else {
+                "Sorry, I couldn't find anything relevant in the graph."
+            }
+            .to_string(),
             Mode::Snarky => {
                 if has_results {
                     self.pick(&[
@@ -705,7 +740,8 @@ impl Personality {
                         "Here's the data. Try not to misinterpret it.",
                         "Found some relevant bits. You're welcome.",
                         "My graph says this is what you're looking for. My graph is rarely wrong.",
-                    ]).to_string()
+                    ])
+                    .to_string()
                 } else {
                     self.pick(&[
                         "Nothing. Maybe try asking something that actually exists in the data?",
