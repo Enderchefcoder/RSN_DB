@@ -88,11 +88,7 @@ impl GraphRagEngine {
 
         for sent in sentences {
             if current_chunk.len() + sent.len() > chunk_size && !current_chunk.is_empty() {
-                let id = format!(
-                    "{:x}",
-                    Sha256::digest(format!("{}_{}", source, count).as_bytes())
-                )[..12]
-                    .to_string();
+                let id = format!("{:x}", Sha256::digest(format!("{}_{}", source, count).as_bytes()))[..12].to_string();
                 chunks.push(TextChunk {
                     id,
                     text: current_chunk.clone(),
