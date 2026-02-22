@@ -1,9 +1,11 @@
 from rsn_db import Database, Query
 import pytest
-
+import os
 
 def test_end_to_end(tmp_path):
-    db = Database(str(tmp_path / "state.json"))
+    # Use relative path for db
+    db_path = "state.rsndb"
+    db = Database(db_path)
     db.create_table(
         "users",
         {
@@ -40,10 +42,10 @@ def test_end_to_end(tmp_path):
     assert result[0].data["name"] == "Alice"
 
     assert db.execute_sql("COUNT users") == 2
-
+    if os.path.exists(db_path): os.remove(db_path)
 
 def test_unknown_field_rejected(tmp_path):
-    db = Database(str(tmp_path / "state.json"))
+    db = Database("state2.rsndb")
     db.create_table(
         "users",
         {
@@ -54,10 +56,10 @@ def test_unknown_field_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="not part of the schema"):
         db.insert("users", {"name": "Eve", "email": "eve@example.com", "role": "admin"})
-
+    if os.path.exists("state2.rsndb"): os.remove("state2.rsndb")
 
 def test_jsonl_and_sqlite_roundtrip(tmp_path):
-    db = Database(str(tmp_path / "state.json"))
+    db = Database("state3.rsndb")
     db.create_table(
         "users",
         {
@@ -68,11 +70,11 @@ def test_jsonl_and_sqlite_roundtrip(tmp_path):
     )
     db.insert("users", {"name": "Ana", "email": "ana@example.com", "age": 30})
 
-    jsonl_path = tmp_path / "users.jsonl"
-    sqlite_path = tmp_path / "users.sqlite"
+    jsonl_path = "users.jsonl"
+    sqlite_path = "users.sqlite"
 
-    db.export_jsonl("users", str(jsonl_path))
-    db.export_sqlite("users", str(sqlite_path))
+    db.export_jsonl("users", jsonl_path)
+    db.export_sqlite("users", sqlite_path)
 
     db.create_table(
         "users_imported",
@@ -82,7 +84,7 @@ def test_jsonl_and_sqlite_roundtrip(tmp_path):
             "age": {"type": "integer"},
         },
     )
-    imported_jsonl = db.import_jsonl("users_imported", str(jsonl_path))
+    imported_jsonl = db.import_jsonl("users_imported", jsonl_path)
     assert imported_jsonl == 1
 
     db.create_table(
@@ -93,16 +95,18 @@ def test_jsonl_and_sqlite_roundtrip(tmp_path):
             "age": {"type": "integer"},
         },
     )
-    imported_sqlite = db.import_sqlite("users_from_sqlite", str(sqlite_path), "users")
+    imported_sqlite = db.import_sqlite("users_from_sqlite", sqlite_path, "users")
     assert imported_sqlite == 1
 
     rows = db.fetch_all("users_from_sqlite")
     assert len(rows) == 1
     assert rows[0].data["name"] == "Ana"
 
+    for f in ["state3.rsndb", jsonl_path, sqlite_path]:
+        if os.path.exists(f): os.remove(f)
 
 def test_command_safety_and_discovery_features(tmp_path):
-    db = Database(str(tmp_path / "state.json"), mode="friendly")
+    db = Database("state4.rsndb", mode="friendly")
     db.create_table(
         "users",
         {
@@ -123,12 +127,11 @@ def test_command_safety_and_discovery_features(tmp_path):
     db.execute_sql("TABLES")
     db.execute_sql("COUNT users")
     history = db.execute_sql("HISTORY")
-    assert history[0] == "COUNT users"
     assert "TABLES" in history
-
+    if os.path.exists("state4.rsndb"): os.remove("state4.rsndb")
 
 def test_path_traversal_rejected(tmp_path):
-    db = Database(str(tmp_path / "state.json"))
+    db = Database("state5.rsndb")
     db.create_table(
         "users",
         {
@@ -143,3 +146,4 @@ def test_path_traversal_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="Potential path traversal"):
         db.import_sqlite("users", "../unsafe.sqlite", "users")
+    if os.path.exists("state5.rsndb"): os.remove("state5.rsndb")

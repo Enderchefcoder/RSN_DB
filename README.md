@@ -108,3 +108,16 @@ RSN DB takes your data seriously (even if it doesn't take *you* seriously).
 
 ## License
 MIT
+
+## GraphRAG (New in v0.2.0)
+RSN DB now includes a built-in GraphRAG engine for knowledge retrieval without heavy LLMs.
+Usage:
+```python
+db.ingest("Large text document...", source="my_doc")
+print(db.graph_query("What are the key entities?"))
+```
+Or via SQL:
+```sql
+INGEST "My interesting text..."
+GRAPH_QUERY Who is related to what?
+```
