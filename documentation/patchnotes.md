@@ -21,3 +21,23 @@
 *Timestamp: 2025-01-15 16:00:00*
 *Exploit: Path Traversal*
 *Severity: High (Fixed)*
+
+## [v0.2.0] - 2026-02-22
+### Added
+- **GraphRAG Engine**: Pure Rust implementation of GraphRAG. High-performance ingestion (<1s/1000 words) and query.
+- **Binary Storage**: Switched to .rsndb binary format using bincode for better efficiency and security.
+- **Extended Snark**: New personality responses for graph operations.
+- **SQL Commands**: Added INGEST and GRAPH_QUERY commands.
+
+### Fixed
+- **Deep Security Audit**:
+    - Fixed stack overflow vulnerability in ALIAS expansion.
+    - Fixed recursion limit in JSON serialization.
+    - Optimized unique field validation from O(N^2) to O(N).
+    - Hardened path sanitization against absolute paths and advanced traversal.
+    - Removed all potential panics in core engine.
+
+---
+*Timestamp: 2026-02-22 16:56:45*
+*Exploit: Various (DoS, Injection, Traversal)*
+*Severity: Critical (Fixed)*

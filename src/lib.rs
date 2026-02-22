@@ -1,10 +1,14 @@
 pub mod personality;
+pub mod graph_rag;
+
+const MAX_RECURSION_DEPTH: usize = 64;
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use personality::{Mode, Personality};
+use graph_rag::GraphRagEngine;
 use pyo3::exceptions::{PyIOError, PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -15,12 +19,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 use zstd::stream::{decode_all, encode_all};
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 #[derive(Debug, Error)]
 enum DbError {
@@ -44,6 +48,13 @@ enum DbError {
 
 type DbResult<T> = Result<T, DbError>;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+enum CompressionAlgo {
+    Zstd,
+    Lz4,
+    None,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FieldDef {
     field_type: FieldType,
@@ -51,7 +62,7 @@ struct FieldDef {
     unique: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 enum FieldType {
     String,
     Integer,
@@ -127,6 +138,8 @@ struct Table {
     schema: HashMap<String, FieldDef>,
     records: HashMap<u64, Map<String, Value>>,
     next_id: u64,
+    #[serde(skip)]
+    unique_cache: HashMap<String, HashSet<String>>,
 }
 
 impl Table {
@@ -135,6 +148,7 @@ impl Table {
             schema,
             records: HashMap::new(),
             next_id: 1,
+            unique_cache: HashMap::new(),
         }
     }
     fn validate_payload(
@@ -164,14 +178,19 @@ impl Table {
             }
             if def.unique {
                 if let Some(candidate) = payload.get(field) {
-                    for (rid, record) in &self.records {
-                        if Some(*rid) == updating {
-                            continue;
-                        }
-                        if let Some(existing) = record.get(field) {
-                            if existing == candidate {
-                                return Err(DbError::UniqueViolation(field.clone()));
+                    let serialized = candidate.to_string();
+                    if let Some(set) = self.unique_cache.get(field) {
+                        if set.contains(&serialized) {
+                            if let Some(rid) = updating {
+                                if let Some(old_record) = self.records.get(&rid) {
+                                    if let Some(old_val) = old_record.get(field) {
+                                        if old_val == candidate {
+                                            continue;
+                                        }
+                                    }
+                                }
                             }
+                            return Err(DbError::UniqueViolation(field.clone()));
                         }
                     }
                 }
@@ -181,10 +200,30 @@ impl Table {
     }
     fn insert(&mut self, mut payload: Map<String, Value>) -> DbResult<u64> {
         self.validate_payload(&mut payload, None)?;
+        for (f, def) in &self.schema {
+            if def.unique {
+                if let Some(val) = payload.get(f) {
+                    self.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(val.to_string());
+                }
+            }
+        }
         let id = self.next_id;
         self.next_id += 1;
         self.records.insert(id, payload);
         Ok(id)
+    }
+    fn delete(&mut self, rid: u64) -> DbResult<()> {
+        let old = self.records.remove(&rid).ok_or(DbError::MissingRecord(rid))?;
+        for (f, def) in &self.schema {
+            if def.unique {
+                if let Some(val) = old.get(f) {
+                    if let Some(set) = self.unique_cache.get_mut(f) {
+                        set.remove(&val.to_string());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     fn update(&mut self, rid: u64, patch: Map<String, Value>) -> DbResult<()> {
         let mut merged = self
@@ -196,6 +235,20 @@ impl Table {
             merged.insert(k, v);
         }
         self.validate_payload(&mut merged, Some(rid))?;
+        for (f, def) in &self.schema {
+            if def.unique {
+                if let Some(old_record) = self.records.get(&rid) {
+                    if let Some(old_val) = old_record.get(f) {
+                        if let Some(set) = self.unique_cache.get_mut(f) {
+                            set.remove(&old_val.to_string());
+                        }
+                    }
+                }
+                if let Some(new_val) = merged.get(f) {
+                    self.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(new_val.to_string());
+                }
+            }
+        }
         self.records.insert(rid, merged);
         Ok(())
     }
@@ -205,6 +258,7 @@ impl Table {
 struct Engine {
     tables: HashMap<String, Table>,
     aliases: HashMap<String, String>,
+    graph_rag: GraphRagEngine,
 }
 
 impl Engine {
@@ -212,6 +266,22 @@ impl Engine {
         Self {
             tables: HashMap::new(),
             aliases: HashMap::new(),
+            graph_rag: GraphRagEngine::new(),
+        }
+    }
+    fn rebuild_cache(&mut self) {
+        self.graph_rag.rebuild_tfidf();
+        for table in self.tables.values_mut() {
+            table.unique_cache.clear();
+            for record in table.records.values() {
+                for (f, def) in &table.schema {
+                    if def.unique {
+                        if let Some(val) = record.get(f) {
+                            table.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(val.to_string());
+                        }
+                    }
+                }
+            }
         }
     }
     fn create_table(&mut self, name: &str, schema: HashMap<String, FieldDef>) -> DbResult<()> {
@@ -289,7 +359,7 @@ struct Database {
     engine: Engine,
     storage_path: Option<PathBuf>,
     encryption_key: Option<[u8; 32]>,
-    compression: bool,
+    compression: CompressionAlgo,
     personality: Personality,
     command_history: Vec<String>,
     batch_mode: bool,
@@ -299,16 +369,21 @@ struct Database {
 #[pymethods]
 impl Database {
     #[new]
-    #[pyo3(signature = (storage_path=None, encryption_key=None, compression=true, mode="professional"))]
+    #[pyo3(signature = (storage_path=None, encryption_key=None, compression="zstd", mode="professional"))]
     fn new(
         storage_path: Option<String>,
         encryption_key: Option<String>,
-        compression: bool,
+        compression: &str,
         mode: &str,
     ) -> PyResult<Self> {
-        let path = storage_path
-            .map(|candidate| sanitize_path(&candidate))
+        let mut path = storage_path
+            .map(|candidate| sanitize_db_path(&candidate))
             .transpose()?;
+        if let Some(ref mut p) = path {
+            if p.extension().is_none() {
+                p.set_extension("rsndb");
+            }
+        }
         let key = encryption_key.map(|k| {
             let mut hasher = Sha256::new();
             hasher.update(k.as_bytes());
@@ -321,11 +396,17 @@ impl Database {
             "snarky" => Mode::Snarky,
             _ => Mode::Professional,
         };
+        let comp_algo = match compression.to_lowercase().as_str() {
+            "zstd" => CompressionAlgo::Zstd,
+            "lz4" => CompressionAlgo::Lz4,
+            "none" => CompressionAlgo::None,
+            _ => CompressionAlgo::Zstd,
+        };
         let mut db = Self {
             engine: Engine::new(),
             storage_path: path,
             encryption_key: key,
-            compression,
+            compression: comp_algo,
             personality: Personality::new(mode_enum),
             command_history: Vec::new(),
             batch_mode: false,
@@ -344,10 +425,10 @@ impl Database {
             let d = def.downcast::<PyDict>()?;
             let rtype = d
                 .get_item("type")?
-                .ok_or_else(|| PyValueError::new_err("schema field requires `type`"))?
+                .ok_or_else(|| PyValueError::new_err("schema field requires type"))?
                 .extract::<String>()?;
             let ftype = FieldType::from_str(&rtype).ok_or_else(|| {
-                PyValueError::new_err(format!("unsupported field type `{rtype}`"))
+                PyValueError::new_err(format!("unsupported field type {}", rtype))
             })?;
             let req = d
                 .get_item("required")?
@@ -424,20 +505,12 @@ impl Database {
     }
 
     fn delete(&mut self, table: String, rid: u64) -> PyResult<()> {
-        if self
-            .engine
+        self.engine
             .tables
             .get_mut(&table)
             .ok_or_else(|| PyKeyError::new_err(format!("table '{}' does not exist", table)))?
-            .records
-            .remove(&rid)
-            .is_none()
-        {
-            return Err(PyKeyError::new_err(format!(
-                "record id '{}' does not exist",
-                rid
-            )));
-        }
+            .delete(rid)
+            .map_err(convert_db_error)?;
         self.persist()?;
         Ok(())
     }
@@ -492,13 +565,36 @@ impl Database {
         Ok(res)
     }
 
+    #[pyo3(signature = (text, source=None))]
+    fn ingest(&mut self, text: String, source: Option<String>) -> PyResult<String> {
+        let src = source.unwrap_or_else(|| "unknown".to_string());
+        let word_count = text.split_whitespace().count();
+        self.engine.graph_rag.ingest(&text, &src);
+        self.persist()?;
+        Ok(self.personality.graph_ingested(word_count))
+    }
+
+    fn graph_query(&self, query: String) -> PyResult<String> {
+        let result = self.engine.graph_rag.query(&query);
+        let has_results = !result.contains("No relevant information found");
+        let prefix = self.personality.graph_query_result(has_results);
+        Ok(format!("{}\n\n{}", prefix, result))
+    }
+
     fn execute_sql(&mut self, py: Python<'_>, sql: String) -> PyResult<PyObject> {
+        self.execute_sql_recursive(py, sql, 0)
+    }
+
+    fn execute_sql_recursive(&mut self, py: Python<'_>, sql: String, depth: usize) -> PyResult<PyObject> {
+        if depth > MAX_RECURSION_DEPTH {
+            return Err(PyRuntimeError::new_err("Max alias recursion depth exceeded"));
+        }
         if self.batch_mode && !["COMMIT", "ROLLBACK"].contains(&sql.to_ascii_uppercase().as_str()) {
             self.batch_ops.push(sql.clone());
             return Ok("".into_py(py));
         }
 
-        self.command_history.push(sql.clone());
+        if depth == 0 { self.command_history.push(sql.clone()); }
         let toks: Vec<&str> = sql.split_whitespace().collect();
         if toks.is_empty() {
             let empty_count = self
@@ -510,6 +606,20 @@ impl Database {
         }
 
         match toks[0].to_ascii_uppercase().as_str() {
+            "INGEST" => {
+                if toks.len() < 2 {
+                    return Err(PyValueError::new_err("INGEST requires text"));
+                }
+                let text = toks[1..].join(" ");
+                self.ingest(text, None).map(|s| s.into_py(py))
+            }
+            "GRAPH_QUERY" => {
+                if toks.len() < 2 {
+                    return Err(PyValueError::new_err("GRAPH_QUERY requires a query"));
+                }
+                let q = toks[1..].join(" ");
+                self.graph_query(q).map(|s| s.into_py(py))
+            }
             "SHOW" | "TABLES" => Ok(self.engine.tables.keys().cloned().collect::<Vec<_>>().into_py(py)),
             "COUNT" => {
                 if toks.len() < 2 {
@@ -531,7 +641,7 @@ impl Database {
                     .command_history
                     .iter()
                     .rev()
-                    .filter(|cmd| !cmd.trim().is_empty())
+                    .filter(|cmd| !cmd.trim().is_empty() && !cmd.to_uppercase().starts_with("HISTORY"))
                     .take(10)
                     .cloned()
                     .collect::<Vec<_>>();
@@ -546,7 +656,7 @@ impl Database {
                 self.batch_mode = false;
                 let ops: Vec<_> = self.batch_ops.drain(..).collect();
                 for operation in &ops {
-                    self.execute_sql(py, operation.clone())?;
+                    self.execute_sql_recursive(py, operation.clone(), depth + 1)?;
                 }
                 Ok(self.personality.batch_committed(ops.len()).into_py(py))
             }
@@ -559,12 +669,11 @@ impl Database {
                 self.engine.aliases.insert(alias_name, toks[3..].join(" "));
                 Ok("Alias created.".into_py(py))
             }
-            "FIND" if toks.join(" ").contains("older than Bob") => Ok("⚙ Translating...\n  Interpreted as: READ users WHERE age > (SELECT age FROM users WHERE name = \"Bob\") AND has_outbound_edge(\"FOLLOWS\")\nIs that it?\nY for yes, N or blank for no\nr>y\n╭── Results ────────────────────╮\n│  • Alice (30)                 │\n│  • Charlie (35)               │\n╰───────────────────────────────╯".into_py(py)),
             "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => Ok(self.personality.why_mean().into_py(py)),
             "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
             _ => {
                 if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
-                    return self.execute_sql(py, translated.clone());
+                    return self.execute_sql_recursive(py, translated.clone(), depth + 1);
                 }
                 if toks[0] == "DELTE" {
                     return Err(PyValueError::new_err(self.personality.typo_suggestion("DELTE", "DELETE")));
@@ -589,30 +698,29 @@ impl Database {
             out.push_str(&row);
             out.push('\n');
         }
-        let output_path = sanitize_path(&dest)?;
+        let output_path = sanitize_user_path(&dest)?;
         fs::write(output_path, out).map_err(|e| PyIOError::new_err(e.to_string()))
     }
     fn import_jsonl(&mut self, table: String, src: String) -> PyResult<usize> {
-        let source_path = sanitize_path(&src)?;
+        let source_path = sanitize_user_path(&src)?;
         let d = fs::read_to_string(source_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
         let t = self
             .engine
             .tables
             .get_mut(&table)
             .ok_or_else(|| PyKeyError::new_err("missing table"))?;
-        let mut n = 0;
-        for l in d.lines() {
-            if l.trim().is_empty() {
+        let mut count = 0;
+        for line in d.lines() {
+            if line.trim().is_empty() {
                 continue;
             }
-            let mut p: Map<String, Value> = serde_json::from_str(l)
-                .map_err(|e| PyValueError::new_err(format!("invalid JSONL row: {}", e)))?;
-            p.remove("id");
-            t.insert(p).map_err(convert_db_error)?;
-            n += 1;
+            let mut payload: Map<String, Value> = serde_json::from_str(line).map_err(|e| PyValueError::new_err(format!("invalid JSONL row: {}", e)))?;
+            payload.remove("id");
+            t.insert(payload).map_err(convert_db_error)?;
+            count += 1;
         }
         self.persist()?;
-        Ok(n)
+        Ok(count)
     }
     fn export_sqlite(&self, table: String, dest: String) -> PyResult<()> {
         let t = self
@@ -620,18 +728,18 @@ impl Database {
             .tables
             .get(&table)
             .ok_or_else(|| PyKeyError::new_err("missing table"))?;
-        let output_path = sanitize_path(&dest)?;
+        let output_path = sanitize_user_path(&dest)?;
         let conn = Connection::open(output_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
         let mut fields: Vec<_> = t.schema.iter().collect();
         fields.sort_by_key(|f| f.0);
         let cols = fields
             .iter()
-            .map(|(n, d)| format!("\"{}\" {}", n, d.field_type.sql_label()))
+            .map(|(n, d)| format!("[{}] {}", n, d.field_type.sql_label()))
             .collect::<Vec<_>>()
             .join(", ");
         conn.execute(
             &format!(
-                "CREATE TABLE IF NOT EXISTS \"{}\" (id INTEGER PRIMARY KEY, {})",
+                "CREATE TABLE IF NOT EXISTS [{}] (id INTEGER PRIMARY KEY, {})",
                 table, cols
             ),
             [],
@@ -642,11 +750,11 @@ impl Database {
             .collect::<Vec<_>>()
             .join(", ");
         let stmt = format!(
-            "INSERT INTO \"{}\" (id, {}) VALUES ({})",
+            "INSERT INTO [{}] (id, {}) VALUES ({})",
             table,
             fields
                 .iter()
-                .map(|f| format!("\"{}\"", f.0))
+                .map(|f| format!("[{}]", f.0))
                 .collect::<Vec<_>>()
                 .join(", "),
             placeholders
@@ -667,7 +775,7 @@ impl Database {
                         }
                     }
                     Value::String(s) => SqlValue::Text(s.clone()),
-                    _ => SqlValue::Text(r.get(*fnm).unwrap().to_string()),
+                    _ => SqlValue::Text(r.get(*fnm).unwrap_or(&Value::Null).to_string()),
                 });
             }
             conn.execute(&stmt, rusqlite::params_from_iter(p))
@@ -675,6 +783,8 @@ impl Database {
         }
         Ok(())
     }
+
+    #[pyo3(signature = (table, src, src_table=None))]
     fn import_sqlite(
         &mut self,
         table: String,
@@ -683,7 +793,7 @@ impl Database {
     ) -> PyResult<usize> {
         let sn = src_table.unwrap_or(table.clone());
         validate_identifier(&sn).map_err(convert_db_error)?;
-        let source_path = sanitize_path(&src)?;
+        let source_path = sanitize_user_path(&src)?;
         let conn = Connection::open(source_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
         let t = self
             .engine
@@ -691,7 +801,7 @@ impl Database {
             .get_mut(&table)
             .ok_or_else(|| PyKeyError::new_err("missing table"))?;
         let mut s = conn
-            .prepare(&format!("SELECT * FROM \"{}\"", sn))
+            .prepare(&format!("SELECT * FROM [{}]", sn))
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let cols: Vec<_> = s.column_names().into_iter().map(String::from).collect();
         let mut rows = s
@@ -704,7 +814,7 @@ impl Database {
         {
             let mut p = Map::new();
             for (i, name) in cols.iter().enumerate() {
-                if name == "id" || !t.schema.contains_key(name) {
+                if name =="id" || !t.schema.contains_key(name) {
                     continue;
                 }
                 let value_ref = r
@@ -738,7 +848,7 @@ impl Database {
     fn load(&mut self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
             if p.exists() {
-                let mut b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                let b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
                 if b.len() < 32 {
                     return Err(PyValueError::new_err("corrupted file"));
                 }
@@ -754,21 +864,34 @@ impl Database {
                         .decrypt(&data)
                         .map_err(|e| PyRuntimeError::new_err(e))?;
                 }
-                if self.compression {
-                    data = decode_all(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                match self.compression {
+                    CompressionAlgo::Zstd => {
+                        data = decode_all(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                    }
+                    CompressionAlgo::Lz4 => {
+                        data = decompress_size_prepended(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                    }
+                    CompressionAlgo::None => {}
                 }
-                self.engine = serde_json::from_slice(&data)
+                self.engine = bincode::deserialize(&data)
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                self.engine.rebuild_cache();
             }
         }
         Ok(())
     }
     fn persist(&self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
-            let mut b = serde_json::to_vec(&self.engine)
+            let mut b = bincode::serialize(&self.engine)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-            if self.compression {
-                b = encode_all(&b[..], 3).map_err(|e| PyIOError::new_err(e.to_string()))?;
+            match self.compression {
+                CompressionAlgo::Zstd => {
+                    b = encode_all(&b[..], 3).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                }
+                CompressionAlgo::Lz4 => {
+                    b = compress_prepend_size(&b[..]);
+                }
+                CompressionAlgo::None => {}
             }
             if self.encryption_key.is_some() {
                 b = self.encrypt(&b).map_err(|e| PyRuntimeError::new_err(e))?;
@@ -785,7 +908,7 @@ impl Database {
         Ok(())
     }
     fn encrypt(&self, d: &[u8]) -> Result<Vec<u8>, String> {
-        let k = self.encryption_key.ok_or("no key")?;
+        let k = self.encryption_key.ok_or("no key".to_string())?;
         let c = Aes256Gcm::new_from_slice(&k).map_err(|e| e.to_string())?;
         let mut n_b = [0u8; 12];
         thread_rng().fill(&mut n_b);
@@ -796,9 +919,9 @@ impl Database {
         Ok(out)
     }
     fn decrypt(&self, d: &[u8]) -> Result<Vec<u8>, String> {
-        let k = self.encryption_key.ok_or("no key")?;
+        let k = self.encryption_key.ok_or("no key".to_string())?;
         if d.len() < 12 {
-            return Err("bad data".into());
+            return Err("bad data".to_string());
         }
         let c = Aes256Gcm::new_from_slice(&k).map_err(|e| e.to_string())?;
         let n = Nonce::from_slice(&d[..12]);
@@ -806,23 +929,32 @@ impl Database {
     }
 }
 
-fn sanitize_path(raw: &str) -> PyResult<PathBuf> {
+fn sanitize_db_path(raw: &str) -> PyResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(PyValueError::new_err("path cannot be empty"));
     }
     if raw.contains('\0') {
         return Err(PyValueError::new_err("path contains invalid null byte"));
     }
-
-    let path = PathBuf::from(raw);
-    for component in path.components() {
-        if matches!(component, Component::ParentDir | Component::Prefix(_)) {
-            return Err(PyValueError::new_err("Potential path traversal detected."));
-        }
+    if raw.contains("..") {
+        return Err(PyValueError::new_err("Potential path traversal detected."));
     }
-
-    Ok(path)
+    Ok(PathBuf::from(raw))
 }
+
+fn sanitize_user_path(raw: &str) -> PyResult<PathBuf> {
+    if raw.trim().is_empty() {
+        return Err(PyValueError::new_err("path cannot be empty"));
+    }
+    if raw.contains('\0') {
+        return Err(PyValueError::new_err("path contains invalid null byte"));
+    }
+    if raw.contains("..") || raw.starts_with('/') {
+        return Err(PyValueError::new_err("Potential path traversal detected."));
+    }
+    Ok(PathBuf::from(raw))
+}
+
 fn validate_identifier(i: &str) -> DbResult<()> {
     if i.is_empty() || !i.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(DbError::InvalidIdentifier(i.to_string()));
@@ -830,6 +962,13 @@ fn validate_identifier(i: &str) -> DbResult<()> {
     Ok(())
 }
 fn py_to_json(v: Bound<'_, PyAny>) -> PyResult<Value> {
+    py_to_json_recursive(v, 0)
+}
+
+fn py_to_json_recursive(v: Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(PyValueError::new_err("Max recursion depth exceeded in JSON conversion"));
+    }
     if v.is_none() {
         return Ok(Value::Null);
     }
@@ -850,14 +989,14 @@ fn py_to_json(v: Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(l) = v.downcast::<PyList>() {
         let mut out = Vec::new();
         for i in l {
-            out.push(py_to_json(i)?);
+            out.push(py_to_json_recursive(i.clone(), depth + 1)?);
         }
         return Ok(Value::Array(out));
     }
     if let Ok(d) = v.downcast::<PyDict>() {
         let mut out = Map::new();
         for (k, v) in d.iter() {
-            out.insert(k.extract::<String>()?, py_to_json(v)?);
+            out.insert(k.extract::<String>()?, py_to_json_recursive(v.clone(), depth + 1)?);
         }
         return Ok(Value::Object(out));
     }
@@ -873,7 +1012,7 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
             } else if let Some(u) = n.as_u64() {
                 u.into_py(py)
             } else {
-                n.as_f64().unwrap().into_py(py)
+                n.as_f64().unwrap_or(0.0).into_py(py)
             }
         }
         Value::String(s) => s.into_py(py),
@@ -897,8 +1036,8 @@ fn value_cmp(l: &Value, r: &Value) -> Ordering {
     match (l, r) {
         (Value::Number(a), Value::Number(b)) => a
             .as_f64()
-            .unwrap()
-            .partial_cmp(&b.as_f64().unwrap())
+            .unwrap_or(0.0)
+            .partial_cmp(&b.as_f64().unwrap_or(0.0))
             .unwrap_or(Ordering::Equal),
         (Value::String(a), Value::String(b)) => a.cmp(b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
