@@ -63,9 +63,7 @@ impl GraphRagEngine {
             let extracted_relations = self.extract_relations(&chunk.text, &extracted_entities);
 
             for ent in extracted_entities {
-                self.data
-                    .entities
-                    .entry(ent.name.clone())
+                self.data.entities.entry(ent.name.clone())
                     .and_modify(|e| e.mentions += 1)
                     .or_insert(ent);
             }
