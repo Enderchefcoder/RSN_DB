@@ -183,24 +183,33 @@ def test_dos_limits_command_batch_and_ingest(tmp_path):
 
 
 def test_jsonl_import_limits(tmp_path):
-    db = Database(str(tmp_path / "state8.rsndb"))
-    db.create_table(
-        "users",
-        {
-            "name": {"type": "string", "required": True},
-            "email": {"type": "string", "required": True, "unique": True},
-        },
-    )
+    # Save current working directory
+    cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        db = Database("state8.rsndb")
+        db.create_table(
+            "users",
+            {
+                "name": {"type": "string", "required": True},
+                "email": {"type": "string", "required": True, "unique": True},
+            },
+        )
 
-    oversize_path = tmp_path / "oversize.jsonl"
-    oversize_path.write_text("x" * (10 * 1024 * 1024 + 1))
-    with pytest.raises(ValueError, match="JSONL import exceeds max file size"):
-        db.import_jsonl("users", str(oversize_path))
+        oversize_path = "oversize.jsonl"
+        with open(oversize_path, "w") as f:
+            f.write("x" * (10 * 1024 * 1024 + 1))
 
-    too_many_lines_path = tmp_path / "too_many_lines.jsonl"
-    row = '{"name":"u","email":"e{}@x.com"}\n'
-    with too_many_lines_path.open("w", encoding="utf-8") as handle:
-        for index in range(100001):
-            handle.write(row.format(index))
-    with pytest.raises(ValueError, match="JSONL import exceeds max line count"):
-        db.import_jsonl("users", str(too_many_lines_path))
+        with pytest.raises(ValueError, match="JSONL import exceeds max file size"):
+            db.import_jsonl("users", oversize_path)
+
+        too_many_lines_path = "too_many_lines.jsonl"
+        row = '{{"name":"u","email":"e{}@x.com"}}\n'
+        with open(too_many_lines_path, "w", encoding="utf-8") as handle:
+            for index in range(100001):
+                handle.write(row.format(index))
+
+        with pytest.raises(ValueError, match="JSONL import exceeds max line count"):
+            db.import_jsonl("users", too_many_lines_path)
+    finally:
+        os.chdir(cwd)

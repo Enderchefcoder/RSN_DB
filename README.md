@@ -1,127 +1,98 @@
 <div align="center">
-  <h1>RSN DB</h1>
-  <p><strong>A Rust-powered embedded database with a personality.</strong></p>
+  <h1>🦀 RSN DB 🦀</h1>
+  <p><strong>A Rust-powered embedded database with a <i>personality</i>.</strong></p>
   <p>
+    <a href="https://pypi.org/project/rsn-db/"><img src="https://img.shields.io/pypi/v/rsn-db?color=blue&logo=pypi" alt="PyPI version"></a>
     <img alt="rust" src="https://img.shields.io/badge/Rust-1.75%2B-orange?logo=rust" />
     <img alt="python" src="https://img.shields.io/badge/Python-3.9%2B-blue?logo=python" />
-    <img alt="security" src="https://img.shields.io/badge/Security-Insane-red" />
+    <img alt="license" src="https://img.shields.io/badge/License-MIT-green" />
   </p>
 </div>
 
-## Features
-
-- **Insane Safety & Security**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
-- **Dynamic Personality**: Choose your experience—Professional, Friendly, or **Snarky** with richer reactions, achievements, and batch summaries.
-- **Interactive CLI**: Just type `rsn` and get to work.
-- **Smart Data Handling**: Constraints, Aliases, Batch Operations, and Smart Type Coercion.
-- **Command UX Features**: Talk to your data with `FIND`, inspect schemas with `DESCRIBE`, and review recent activity via `HISTORY`.
-
 ---
 
-## Interactive Session Demo
+## 🚀 Setup & Installation
 
-### Snarky Mode Activation
-*Caption: Setting up RSN DB for the first time and enabling full snark mode.*
-```text
-$ rsn
-Select mode:
-  [1] Professional (clean, minimal output)
-  [2] Friendly     (helpful with personality)
-  [3] Snarky       (full commentary enabled)
+Get up and running in seconds. RSN DB is a single package with everything baked in.
 
-Choice (default: 1): 3
-Remember this choice? (y/n): y
+<img src="assets/setup.gif" width="100%" alt="RSN DB Setup">
 
-✓ Snarky mode enabled.
-  Don't say I didn't warn you.
-
-rsn>
-```
-
-### Natural Language Query
-*Caption: Using the FIND command to translate complex questions into database queries.*
-```text
-rsn> FIND users older than Bob who follow someone
-⚙ Translating...
-  Interpreted as: READ users WHERE age > (SELECT age FROM users WHERE name = "Bob") AND has_outbound_edge("FOLLOWS")
-Is that it?
-Y for yes, N or blank for no
-r>y
-╭── Results ────────────────────╮
-│  • Alice (30)                 │
-│  • Charlie (35)               │
-╰───────────────────────────────╯
-```
-
-### Batch Operations & Achievement
-*Caption: Executing a fast batch of inserts and getting roasted/rewarded by the engine.*
-```text
-rsn> BATCH
-batch> INSERT users (name: "User1", age: 20)
-batch> INSERT users (name: "User2", age: 21)
-batch> INSERT users (name: "User3", age: 22)
-batch> COMMIT
-
-✓ Batch executed: 3 operations.
-  (Wow! You're fast! Very hard work. Good job. My grandmother can't do that. Not that I have one, since I'm a robot.)
-
-... (after 50 perfect commands) ...
-
-[SYSTEM]: Achievement unlocked: "Actually Competent"
-[SYSTEM]: Updating user classification from "Hopeless" to "Occasionally Capable"
-```
-
----
-
-## Quickstart
-
-### Installation
 ```bash
 pip install rsn_db
 ```
 
-### CLI Usage
+---
+
+## ✨ Features
+
+- **🛡️ Insane Safety**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
+- **🎭 Dynamic Personality**: Choose between **Professional**, **Friendly**, or **Snarky** modes.
+- **💻 Interactive CLI**: A powerful REPL with syntax highlighting (simulated) and natural language queries.
+- **🧠 GraphRAG**: Built-in knowledge retrieval engine without the LLM overhead.
+- **⚡ High Performance**: Powered by Rust, utilizing `bincode` for O(1) serialization and optimized indexes.
+
+---
+
+## 🎮 Interactive Session
+
+Watch RSN DB in action. Here we use the **Snarky** mode to create a table, insert data, and run a query.
+
+<img src="assets/usage.gif" width="100%" alt="RSN DB Usage">
+
+---
+
+## 📖 Quickstart
+
+### Python Library
+The library is "all business"—no snark, just performance.
+
+```python
+from rsn_db import Database
+
+# Initialize with encryption
+db = Database(storage_path="data.rsn", encryption_key="super-secret")
+
+# Create a table
+db.create_table("users", {"name": {"type": "string", "required": True}})
+
+# Insert data
+db.insert("users", {"name": "Alice", "age": 30})
+
+# Query data
+results = db.execute_sql("FIND users WHERE age > 20")
+print(results)
+```
+
+### CLI
+Just run `rsn` to start the interactive shell.
+
 ```bash
 rsn
 ```
 
-### Library Usage
-```python
-from rsn_db import Database
+---
 
-# The library is all business. No snark here.
-db = Database(storage_path="my_data.rsn", encryption_key="secret-key")
-db.create_table("users", {"name": {"type": "string", "required": True}})
-db.insert("users", {"name": "Alice"})
+## 🔒 Security & Safety
+
+RSN DB is built with a security-first mindset:
+- **Encryption at Rest**: AES-256-GCM for all data.
+- **Integrity**: SHA-256 checksums on every block.
+- **Path Guard**: Blocks absolute paths and directory traversal.
+- **DoS Protection**: Strict limits on batch sizes and recursion depth.
+
+---
+
+## 🕸️ GraphRAG (New in v0.2.x)
+
+Ingest unstructured text and query relationships directly.
+
+```python
+db.ingest("RSN DB was created by a team of caffeinated engineers.", source="engineers_doc")
+print(db.graph_query("Who created RSN DB?"))
 ```
 
 ---
 
-## Security & Safety
-
-RSN DB takes your data seriously (even if it doesn't take *you* seriously).
-- **Encryption at Rest**: AES-256-GCM for persisted payloads when `encryption_key` is set.
-- **Integrity**: SHA-256 checksums detect persisted file tampering/corruption before decode.
-- **Identifier Safety**: strict identifier validation for table/field names used in generated SQLite SQL.
-- **Path Safety**: import/export paths must be relative and cannot contain parent traversal segments or absolute/prefixed roots. Database storage paths reject traversal segments and invalid prefixes.
-- **DoS Guardrails**: hard limits for command length, batch operation count, ingest payload size, JSONL import file size, and JSONL line count.
-
-For operational guidance and security limits, see `documentation/security.md`.
-
----
-
-## License
-MIT
-
-## GraphRAG (New in v0.2.0)
-RSN DB now includes a built-in GraphRAG engine for knowledge retrieval without heavy LLMs.
-Usage:
-```python
-db.ingest("Large text document...", source="my_doc")
-print(db.graph_query("What are the key entities?"))
-```
-Or via SQL:
-```sql
-INGEST "My interesting text..."
-GRAPH_QUERY Who is related to what?
-```
+<div align="center">
+  <sub>Built with ❤️ and 🦀 by the RSN DB Contributors</sub>
+</div>

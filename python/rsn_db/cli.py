@@ -47,7 +47,7 @@ def main():
     elif mode == "friendly":
         print(f"✓ Friendly mode enabled. Let's build something cool!\n")
     else:
-        print(f"RSN DB v0.1.0 (Professional Mode)\n")
+        print(f"RSN DB v0.2.1 (Professional Mode)\n")
 
     print("Type HELP for commands. Type EXIT to quit.")
 
