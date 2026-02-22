@@ -714,7 +714,7 @@ impl Database {
             if line.trim().is_empty() {
                 continue;
             }
-            let mut payload: Map<String, Value> = serde_json::from_str(line).map_err(|e| PyValueError::new_err(e.to_string()))?;
+            let mut payload: Map<String, Value> = serde_json::from_str(line).map_err(|e| PyValueError::new_err(format!("invalid JSONL row: {}", e)))?;
             payload.remove("id");
             t.insert(payload).map_err(convert_db_error)?;
             count += 1;
