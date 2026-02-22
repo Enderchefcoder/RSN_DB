@@ -4,8 +4,7 @@ import os
 
 def test_end_to_end(tmp_path):
     # Use relative path for db
-    db_path = "state.rsndb"
-    db = Database(db_path)
+    db = Database(str(tmp_path / "state.rsndb"))
     db.create_table(
         "users",
         {
