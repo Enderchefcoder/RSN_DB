@@ -1,5 +1,26 @@
 # Patch Notes
 
+## [v0.2.1] - 2026-02-22
+### Added
+- **Security Documentation**: Added `documentation/security.md` with threat model, limits, and hardening guidance.
+
+### Fixed
+- **DoS Hardening**:
+  - Enforced maximum SQL command length.
+  - Enforced maximum queued BATCH operation count.
+  - Enforced maximum INGEST payload size.
+  - Converted JSONL import to streaming I/O with max file-size and max-line guards.
+- **Input Safety**:
+  - Enforced strict table identifier validation in SQLite export/import SQL paths.
+  - Hardened path sanitization using path-component validation against traversal, absolute, and prefixed paths.
+- **Stability**:
+  - Removed panic risk from GraphRAG regex compilation path.
+
+---
+*Timestamp: 2026-02-22 18:00:00*
+*Exploit: DoS and SQL/path injection hardening*
+*Severity: High (Fixed)*
+
 ## [v0.1.0] - 2025-01-15
 ### Added
 - **Encryption**: Integrated AES-GCM 256-bit encryption for database persistence.

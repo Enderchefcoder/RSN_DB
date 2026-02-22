@@ -1,14 +1,20 @@
-pub mod personality;
 pub mod graph_rag;
+pub mod personality;
 
 const MAX_RECURSION_DEPTH: usize = 64;
+const MAX_COMMAND_LENGTH: usize = 4096;
+const MAX_BATCH_OPS: usize = 512;
+const MAX_INGEST_TEXT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_JSONL_IMPORT_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_JSONL_IMPORT_LINES: usize = 100_000;
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use personality::{Mode, Personality};
 use graph_rag::GraphRagEngine;
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
+use personality::{Mode, Personality};
 use pyo3::exceptions::{PyIOError, PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -21,10 +27,10 @@ use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader};
+use std::path::{Component, PathBuf};
 use thiserror::Error;
 use zstd::stream::{decode_all, encode_all};
-use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 #[derive(Debug, Error)]
 enum DbError {
@@ -203,7 +209,10 @@ impl Table {
         for (f, def) in &self.schema {
             if def.unique {
                 if let Some(val) = payload.get(f) {
-                    self.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(val.to_string());
+                    self.unique_cache
+                        .entry(f.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(val.to_string());
                 }
             }
         }
@@ -213,7 +222,10 @@ impl Table {
         Ok(id)
     }
     fn delete(&mut self, rid: u64) -> DbResult<()> {
-        let old = self.records.remove(&rid).ok_or(DbError::MissingRecord(rid))?;
+        let old = self
+            .records
+            .remove(&rid)
+            .ok_or(DbError::MissingRecord(rid))?;
         for (f, def) in &self.schema {
             if def.unique {
                 if let Some(val) = old.get(f) {
@@ -245,7 +257,10 @@ impl Table {
                     }
                 }
                 if let Some(new_val) = merged.get(f) {
-                    self.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(new_val.to_string());
+                    self.unique_cache
+                        .entry(f.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(new_val.to_string());
                 }
             }
         }
@@ -277,7 +292,11 @@ impl Engine {
                 for (f, def) in &table.schema {
                     if def.unique {
                         if let Some(val) = record.get(f) {
-                            table.unique_cache.entry(f.clone()).or_insert_with(HashSet::new).insert(val.to_string());
+                            table
+                                .unique_cache
+                                .entry(f.clone())
+                                .or_insert_with(HashSet::new)
+                                .insert(val.to_string());
                         }
                     }
                 }
@@ -567,6 +586,12 @@ impl Database {
 
     #[pyo3(signature = (text, source=None))]
     fn ingest(&mut self, text: String, source: Option<String>) -> PyResult<String> {
+        if text.len() > MAX_INGEST_TEXT_BYTES {
+            return Err(PyValueError::new_err(format!(
+                "INGEST payload exceeds max size of {} bytes",
+                MAX_INGEST_TEXT_BYTES
+            )));
+        }
         let src = source.unwrap_or_else(|| "unknown".to_string());
         let word_count = text.split_whitespace().count();
         self.engine.graph_rag.ingest(&text, &src);
@@ -585,16 +610,37 @@ impl Database {
         self.execute_sql_recursive(py, sql, 0)
     }
 
-    fn execute_sql_recursive(&mut self, py: Python<'_>, sql: String, depth: usize) -> PyResult<PyObject> {
+    fn execute_sql_recursive(
+        &mut self,
+        py: Python<'_>,
+        sql: String,
+        depth: usize,
+    ) -> PyResult<PyObject> {
         if depth > MAX_RECURSION_DEPTH {
-            return Err(PyRuntimeError::new_err("Max alias recursion depth exceeded"));
+            return Err(PyRuntimeError::new_err(
+                "Max alias recursion depth exceeded",
+            ));
+        }
+        if sql.len() > MAX_COMMAND_LENGTH {
+            return Err(PyValueError::new_err(format!(
+                "Command exceeds max length of {} bytes",
+                MAX_COMMAND_LENGTH
+            )));
         }
         if self.batch_mode && !["COMMIT", "ROLLBACK"].contains(&sql.to_ascii_uppercase().as_str()) {
+            if self.batch_ops.len() >= MAX_BATCH_OPS {
+                return Err(PyValueError::new_err(format!(
+                    "Batch operation limit exceeded (max {})",
+                    MAX_BATCH_OPS
+                )));
+            }
             self.batch_ops.push(sql.clone());
             return Ok("".into_py(py));
         }
 
-        if depth == 0 { self.command_history.push(sql.clone()); }
+        if depth == 0 {
+            self.command_history.push(sql.clone());
+        }
         let toks: Vec<&str> = sql.split_whitespace().collect();
         if toks.is_empty() {
             let empty_count = self
@@ -620,18 +666,35 @@ impl Database {
                 let q = toks[1..].join(" ");
                 self.graph_query(q).map(|s| s.into_py(py))
             }
-            "SHOW" | "TABLES" => Ok(self.engine.tables.keys().cloned().collect::<Vec<_>>().into_py(py)),
+            "SHOW" | "TABLES" => Ok(self
+                .engine
+                .tables
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_py(py)),
             "COUNT" => {
                 if toks.len() < 2 {
                     return Err(PyValueError::new_err("COUNT requires a table name"));
                 }
-                Ok(self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?.records.len().into_py(py))
+                Ok(self
+                    .engine
+                    .tables
+                    .get(toks[1])
+                    .ok_or_else(|| PyKeyError::new_err("missing table"))?
+                    .records
+                    .len()
+                    .into_py(py))
             }
             "DESCRIBE" => {
                 if toks.len() < 2 {
                     return Err(PyValueError::new_err("DESCRIBE requires a table name"));
                 }
-                let table = self.engine.tables.get(toks[1]).ok_or_else(|| PyKeyError::new_err("missing table"))?;
+                let table = self
+                    .engine
+                    .tables
+                    .get(toks[1])
+                    .ok_or_else(|| PyKeyError::new_err("missing table"))?;
                 let mut fields = table.schema.keys().cloned().collect::<Vec<_>>();
                 fields.sort();
                 Ok(fields.into_py(py))
@@ -641,7 +704,9 @@ impl Database {
                     .command_history
                     .iter()
                     .rev()
-                    .filter(|cmd| !cmd.trim().is_empty() && !cmd.to_uppercase().starts_with("HISTORY"))
+                    .filter(|cmd| {
+                        !cmd.trim().is_empty() && !cmd.to_uppercase().starts_with("HISTORY")
+                    })
                     .take(10)
                     .cloned()
                     .collect::<Vec<_>>();
@@ -662,23 +727,31 @@ impl Database {
             }
             "ALIAS" => {
                 if toks.len() < 4 || toks[2] != "=" {
-                    return Err(PyValueError::new_err("ALIAS format: ALIAS <name> = <command>"));
+                    return Err(PyValueError::new_err(
+                        "ALIAS format: ALIAS <name> = <command>",
+                    ));
                 }
                 let alias_name = toks[1].to_ascii_lowercase();
                 validate_identifier(&alias_name).map_err(convert_db_error)?;
                 self.engine.aliases.insert(alias_name, toks[3..].join(" "));
                 Ok("Alias created.".into_py(py))
             }
-            "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => Ok(self.personality.why_mean().into_py(py)),
+            "WHY" if toks.len() >= 5 && toks[1..4] == ["ARE", "YOU", "SO"] => {
+                Ok(self.personality.why_mean().into_py(py))
+            }
             "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
             _ => {
                 if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
                     return self.execute_sql_recursive(py, translated.clone(), depth + 1);
                 }
                 if toks[0] == "DELTE" {
-                    return Err(PyValueError::new_err(self.personality.typo_suggestion("DELTE", "DELETE")));
+                    return Err(PyValueError::new_err(
+                        self.personality.typo_suggestion("DELTE", "DELETE"),
+                    ));
                 }
-                Err(PyRuntimeError::new_err(self.personality.error("unknown command")))
+                Err(PyRuntimeError::new_err(
+                    self.personality.error("unknown command"),
+                ))
             }
         }
     }
@@ -703,18 +776,34 @@ impl Database {
     }
     fn import_jsonl(&mut self, table: String, src: String) -> PyResult<usize> {
         let source_path = sanitize_user_path(&src)?;
-        let d = fs::read_to_string(source_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        let metadata = fs::metadata(&source_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        if metadata.len() > MAX_JSONL_IMPORT_BYTES {
+            return Err(PyValueError::new_err(format!(
+                "JSONL import exceeds max file size of {} bytes",
+                MAX_JSONL_IMPORT_BYTES
+            )));
+        }
+        let file = fs::File::open(source_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        let reader = BufReader::new(file);
         let t = self
             .engine
             .tables
             .get_mut(&table)
             .ok_or_else(|| PyKeyError::new_err("missing table"))?;
         let mut count = 0;
-        for line in d.lines() {
+        for line_result in reader.lines() {
+            if count >= MAX_JSONL_IMPORT_LINES {
+                return Err(PyValueError::new_err(format!(
+                    "JSONL import exceeds max line count of {}",
+                    MAX_JSONL_IMPORT_LINES
+                )));
+            }
+            let line = line_result.map_err(|e| PyIOError::new_err(e.to_string()))?;
             if line.trim().is_empty() {
                 continue;
             }
-            let mut payload: Map<String, Value> = serde_json::from_str(line).map_err(|e| PyValueError::new_err(format!("invalid JSONL row: {}", e)))?;
+            let mut payload: Map<String, Value> = serde_json::from_str(&line)
+                .map_err(|e| PyValueError::new_err(format!("invalid JSONL row: {}", e)))?;
             payload.remove("id");
             t.insert(payload).map_err(convert_db_error)?;
             count += 1;
@@ -723,6 +812,7 @@ impl Database {
         Ok(count)
     }
     fn export_sqlite(&self, table: String, dest: String) -> PyResult<()> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let t = self
             .engine
             .tables
@@ -791,6 +881,7 @@ impl Database {
         src: String,
         src_table: Option<String>,
     ) -> PyResult<usize> {
+        validate_identifier(&table).map_err(convert_db_error)?;
         let sn = src_table.unwrap_or(table.clone());
         validate_identifier(&sn).map_err(convert_db_error)?;
         let source_path = sanitize_user_path(&src)?;
@@ -814,7 +905,7 @@ impl Database {
         {
             let mut p = Map::new();
             for (i, name) in cols.iter().enumerate() {
-                if name =="id" || !t.schema.contains_key(name) {
+                if name == "id" || !t.schema.contains_key(name) {
                     continue;
                 }
                 let value_ref = r
@@ -866,10 +957,12 @@ impl Database {
                 }
                 match self.compression {
                     CompressionAlgo::Zstd => {
-                        data = decode_all(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                        data =
+                            decode_all(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
                     }
                     CompressionAlgo::Lz4 => {
-                        data = decompress_size_prepended(&data[..]).map_err(|e| PyIOError::new_err(e.to_string()))?;
+                        data = decompress_size_prepended(&data[..])
+                            .map_err(|e| PyIOError::new_err(e.to_string()))?;
                     }
                     CompressionAlgo::None => {}
                 }
@@ -930,29 +1023,39 @@ impl Database {
 }
 
 fn sanitize_db_path(raw: &str) -> PyResult<PathBuf> {
-    if raw.trim().is_empty() {
-        return Err(PyValueError::new_err("path cannot be empty"));
-    }
-    if raw.contains('\0') {
-        return Err(PyValueError::new_err("path contains invalid null byte"));
-    }
-    if raw.contains("..") {
-        return Err(PyValueError::new_err("Potential path traversal detected."));
-    }
-    Ok(PathBuf::from(raw))
+    sanitize_relative_path(raw, false, true)
 }
 
 fn sanitize_user_path(raw: &str) -> PyResult<PathBuf> {
+    sanitize_relative_path(raw, true, false)
+}
+
+fn sanitize_relative_path(
+    raw: &str,
+    require_file_name: bool,
+    allow_absolute: bool,
+) -> PyResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(PyValueError::new_err("path cannot be empty"));
     }
     if raw.contains('\0') {
         return Err(PyValueError::new_err("path contains invalid null byte"));
     }
-    if raw.contains("..") || raw.starts_with('/') {
+    let path = PathBuf::from(raw);
+    if !allow_absolute && path.is_absolute() {
         return Err(PyValueError::new_err("Potential path traversal detected."));
     }
-    Ok(PathBuf::from(raw))
+    for component in path.components() {
+        if matches!(component, Component::ParentDir | Component::Prefix(_))
+            || (!allow_absolute && matches!(component, Component::RootDir))
+        {
+            return Err(PyValueError::new_err("Potential path traversal detected."));
+        }
+    }
+    if require_file_name && path.file_name().is_none() {
+        return Err(PyValueError::new_err("path must include a file name"));
+    }
+    Ok(path)
 }
 
 fn validate_identifier(i: &str) -> DbResult<()> {
@@ -967,7 +1070,9 @@ fn py_to_json(v: Bound<'_, PyAny>) -> PyResult<Value> {
 
 fn py_to_json_recursive(v: Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
     if depth > MAX_RECURSION_DEPTH {
-        return Err(PyValueError::new_err("Max recursion depth exceeded in JSON conversion"));
+        return Err(PyValueError::new_err(
+            "Max recursion depth exceeded in JSON conversion",
+        ));
     }
     if v.is_none() {
         return Ok(Value::Null);
@@ -996,7 +1101,10 @@ fn py_to_json_recursive(v: Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
     if let Ok(d) = v.downcast::<PyDict>() {
         let mut out = Map::new();
         for (k, v) in d.iter() {
-            out.insert(k.extract::<String>()?, py_to_json_recursive(v.clone(), depth + 1)?);
+            out.insert(
+                k.extract::<String>()?,
+                py_to_json_recursive(v.clone(), depth + 1)?,
+            );
         }
         return Ok(Value::Object(out));
     }

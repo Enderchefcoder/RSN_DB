@@ -41,7 +41,6 @@ def test_end_to_end(tmp_path):
     assert result[0].data["name"] == "Alice"
 
     assert db.execute_sql("COUNT users") == 2
-    if os.path.exists(db_path): os.remove(db_path)
 
 def test_unknown_field_rejected(tmp_path):
     db = Database("state2.rsndb")
@@ -146,3 +145,62 @@ def test_path_traversal_rejected(tmp_path):
     with pytest.raises(ValueError, match="Potential path traversal"):
         db.import_sqlite("users", "../unsafe.sqlite", "users")
     if os.path.exists("state5.rsndb"): os.remove("state5.rsndb")
+
+
+def test_sqlite_identifier_validation_blocks_injection_names(tmp_path):
+    db = Database(str(tmp_path / "state6.rsndb"))
+    db.create_table(
+        "users",
+        {
+            "name": {"type": "string", "required": True},
+            "email": {"type": "string", "required": True, "unique": True},
+        },
+    )
+    db.insert("users", {"name": "Ana", "email": "ana@example.com"})
+
+    with pytest.raises(ValueError, match="invalid identifier"):
+        db.export_sqlite("users]; DROP TABLE users; --", str(tmp_path / "safe.sqlite"))
+
+    with pytest.raises(ValueError, match="invalid identifier"):
+        db.import_sqlite("users;bad", str(tmp_path / "safe.sqlite"), "users")
+
+
+def test_dos_limits_command_batch_and_ingest(tmp_path):
+    db = Database(str(tmp_path / "state7.rsndb"))
+
+    with pytest.raises(ValueError, match="Command exceeds max length"):
+        db.execute_sql("A" * 5000)
+
+    db.execute_sql("BATCH")
+    for _ in range(512):
+        db.execute_sql("TABLES")
+
+    with pytest.raises(ValueError, match="Batch operation limit exceeded"):
+        db.execute_sql("TABLES")
+
+    with pytest.raises(ValueError, match="INGEST payload exceeds max size"):
+        db.ingest("A" * (2 * 1024 * 1024 + 1))
+
+
+def test_jsonl_import_limits(tmp_path):
+    db = Database(str(tmp_path / "state8.rsndb"))
+    db.create_table(
+        "users",
+        {
+            "name": {"type": "string", "required": True},
+            "email": {"type": "string", "required": True, "unique": True},
+        },
+    )
+
+    oversize_path = tmp_path / "oversize.jsonl"
+    oversize_path.write_text("x" * (10 * 1024 * 1024 + 1))
+    with pytest.raises(ValueError, match="JSONL import exceeds max file size"):
+        db.import_jsonl("users", str(oversize_path))
+
+    too_many_lines_path = tmp_path / "too_many_lines.jsonl"
+    row = '{"name":"u","email":"e{}@x.com"}\n'
+    with too_many_lines_path.open("w", encoding="utf-8") as handle:
+        for index in range(100001):
+            handle.write(row.format(index))
+    with pytest.raises(ValueError, match="JSONL import exceeds max line count"):
+        db.import_jsonl("users", str(too_many_lines_path))

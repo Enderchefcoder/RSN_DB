@@ -100,9 +100,13 @@ db.insert("users", {"name": "Alice"})
 ## Security & Safety
 
 RSN DB takes your data seriously (even if it doesn't take *you* seriously).
-- **Encryption**: AES-256-GCM keeps your data private.
-- **Integrity**: SHA-256 checksums prevent tampering.
-- **Protection**: Built-in path traversal protection plus stricter command validation to avoid parser crashes.
+- **Encryption at Rest**: AES-256-GCM for persisted payloads when `encryption_key` is set.
+- **Integrity**: SHA-256 checksums detect persisted file tampering/corruption before decode.
+- **Identifier Safety**: strict identifier validation for table/field names used in generated SQLite SQL.
+- **Path Safety**: import/export paths must be relative and cannot contain parent traversal segments or absolute/prefixed roots. Database storage paths reject traversal segments and invalid prefixes.
+- **DoS Guardrails**: hard limits for command length, batch operation count, ingest payload size, JSONL import file size, and JSONL line count.
+
+For operational guidance and security limits, see `documentation/security.md`.
 
 ---
 
