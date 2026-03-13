@@ -933,7 +933,7 @@ impl Database {
                                     Value::String(s.to_string())
                                 }
                             } else {
-                                Value::String(s.to_string())
+                                unreachable!("Field name must be in schema due to check on line 913");
                             }
                         }
                         _ => Value::Null,
