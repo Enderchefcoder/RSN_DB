@@ -725,6 +725,11 @@ impl Database {
                 }
                 Ok(self.personality.batch_committed(ops.len()).into_py(py))
             }
+            "ROLLBACK" => {
+                self.batch_mode = false;
+                self.batch_ops.clear();
+                Ok(self.personality.success("Batch rolled back.").into_py(py))
+            }
             "ALIAS" => {
                 if toks.len() < 4 || toks[2] != "=" {
                     return Err(PyValueError::new_err(
@@ -919,9 +924,17 @@ impl Database {
                         ValueRef::Real(f) => serde_json::Number::from_f64(f)
                             .map(Value::Number)
                             .unwrap_or(Value::Null),
-                        ValueRef::Text(t) => {
-                            let s = String::from_utf8_lossy(t);
-                            serde_json::from_str(&s).unwrap_or(Value::String(s.to_string()))
+                        ValueRef::Text(txt) => {
+                            let s = String::from_utf8_lossy(txt);
+                            if let Some(def) = t.schema.get(name) {
+                                if def.field_type == FieldType::Json {
+                                    serde_json::from_str(&s).unwrap_or(Value::String(s.to_string()))
+                                } else {
+                                    Value::String(s.to_string())
+                                }
+                            } else {
+                                Value::String(s.to_string())
+                            }
                         }
                         _ => Value::Null,
                     },
@@ -1111,6 +1124,15 @@ fn py_to_json_recursive(v: Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
     Err(PyValueError::new_err("bad type"))
 }
 fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
+    json_to_py_recursive(py, v, 0)
+}
+
+fn json_to_py_recursive(py: Python<'_>, v: &Value, depth: usize) -> PyResult<PyObject> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(PyValueError::new_err(
+            "Max recursion depth exceeded in JSON conversion",
+        ));
+    }
     Ok(match v {
         Value::Null => py.None(),
         Value::Bool(b) => b.into_py(py),
@@ -1127,14 +1149,14 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<PyObject> {
         Value::Array(l) => {
             let mut out = Vec::new();
             for i in l {
-                out.push(json_to_py(py, i)?);
+                out.push(json_to_py_recursive(py, i, depth + 1)?);
             }
             out.into_py(py)
         }
         Value::Object(m) => {
             let out = PyDict::new_bound(py);
             for (k, v) in m {
-                out.set_item(k, json_to_py(py, v)?)?;
+                out.set_item(k, json_to_py_recursive(py, v, depth + 1)?)?;
             }
             out.into_py(py)
         }

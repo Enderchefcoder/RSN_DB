@@ -58,6 +58,7 @@ impl GraphRagEngine {
 
     pub fn ingest(&mut self, text: &str, source: &str) {
         let chunks = self.chunk_text(text, source);
+        let mut new_entities = 0;
         for chunk in chunks {
             let extracted_entities = self.extract_entities(&chunk.text);
             let extracted_relations = self.extract_relations(&chunk.text, &extracted_entities);
@@ -65,7 +66,10 @@ impl GraphRagEngine {
             for ent in extracted_entities {
                 self.data.entities.entry(ent.name.clone())
                     .and_modify(|e| e.mentions += 1)
-                    .or_insert(ent);
+                    .or_insert_with(|| {
+                        new_entities += 1;
+                        ent
+                    });
             }
 
             for rel in extracted_relations {
@@ -75,7 +79,9 @@ impl GraphRagEngine {
             self.data.chunks.insert(chunk.id.clone(), chunk);
         }
         self.rebuild_tfidf();
-        self.detect_communities();
+        if new_entities > 0 || self.data.communities.is_empty() {
+            self.detect_communities();
+        }
     }
 
     fn chunk_text(&self, text: &str, source: &str) -> Vec<TextChunk> {
@@ -155,27 +161,30 @@ impl GraphRagEngine {
     pub fn rebuild_tfidf(&mut self) {
         let mut doc_counts: HashMap<String, usize> = HashMap::new();
         let num_docs = self.data.chunks.len();
+        if num_docs == 0 { return; }
 
-        for chunk in self.data.chunks.values() {
+        let mut chunk_lowered = HashMap::new();
+
+        for (cid, chunk) in &self.data.chunks {
             let lower = chunk.text.to_lowercase();
             let words: HashSet<_> = lower.split_whitespace().collect();
             for word in words {
                 *doc_counts.entry(word.to_string()).or_insert(0) += 1;
             }
+            chunk_lowered.insert(cid.clone(), lower);
         }
 
         self.tfidf_index.clear();
-        for (cid, chunk) in &self.data.chunks {
-            let lower = chunk.text.to_lowercase();
+        for (cid, lower) in chunk_lowered {
             let words: Vec<_> = lower.split_whitespace().collect();
             let mut word_counts = HashMap::new();
             for word in &words {
-                *word_counts.entry(word).or_insert(0) += 1;
+                *word_counts.entry(*word).or_insert(0) += 1;
             }
 
             for (word, count) in word_counts {
                 let tf = count as f32 / words.len() as f32;
-                let idf = ((num_docs as f32) / (*doc_counts.get(*word).unwrap_or(&1) as f32)).ln();
+                let idf = ((num_docs as f32) / (*doc_counts.get(word).unwrap_or(&1) as f32)).ln();
                 self.tfidf_index
                     .entry(word.to_string())
                     .or_insert_with(HashMap::new)

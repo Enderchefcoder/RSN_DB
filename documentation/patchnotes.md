@@ -1,5 +1,24 @@
 # Patch Notes
 
+## [v0.2.2] - 2026-03-13
+### Added
+- **Detailed Threat Model**: Added `documentation/threat_model.md` with STRIDE analysis.
+- **Rollback Capability**: Added `ROLLBACK` command to safely abort batch sessions.
+
+### Fixed
+- **DoS Hardening**:
+  - Implemented strict recursion depth limits for all Python/JSON object conversions.
+- **SQLite Import Safety**:
+  - Hardened SQLite import to only parse JSON for fields explicitly defined as `Json` in the schema, preventing type confusion.
+- **Performance & Resource Efficiency**:
+  - Optimized GraphRAG TF-IDF index rebuilding.
+  - Reduced overhead by only triggering community detection when new entities are discovered.
+
+---
+*Timestamp: 2026-03-13 21:31:05*
+*Exploit: Stack Overflow (DoS) and Type Confusion*
+*Severity: Critical (Fixed)*
+
 ## [v0.2.1] - 2026-02-22
 ### Added
 - **Security Documentation**: Added `documentation/security.md` with threat model, limits, and hardening guidance.

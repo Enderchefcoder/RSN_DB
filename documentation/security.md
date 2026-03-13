@@ -1,7 +1,7 @@
 # RSN DB Security Guide
 
 ## Threat model
-RSN DB protects data at rest in local database files and enforces strict input validation for command processing and import/export APIs. It is not a networked service and does not provide transport security.
+RSN DB protects data at rest in local database files and enforces strict input validation for command processing and import/export APIs. Detailed STRIDE analysis can be found in [threat_model.md](threat_model.md).
 
 ## Storage protections
 - AES-256-GCM encryption is used when `encryption_key` is configured.
@@ -15,7 +15,7 @@ RSN DB enforces explicit limits to reduce denial-of-service risk:
 - Max ingest payload: 2 MiB.
 - Max JSONL import file size: 10 MiB.
 - Max JSONL import line count: 100,000.
-- Max alias/JSON recursion depth: 64.
+- Max alias/JSON/Python conversion recursion depth: 64.
 
 ## Path safety model
 - Import/export paths must be relative.
@@ -27,6 +27,7 @@ RSN DB enforces explicit limits to reduce denial-of-service risk:
 ## SQLite import/export safety
 - Table and source table names are validated as strict identifiers (`[A-Za-z0-9_]+`) before SQL statement construction.
 - SQLite values are converted into JSON-safe values during import.
+- **Hardening**: JSON parsing during SQLite import only occurs for fields explicitly defined as `Json` in the schema to prevent type confusion.
 
 ## Operational guidance
 - Use high-entropy encryption keys.
