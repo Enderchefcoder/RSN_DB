@@ -11,7 +11,7 @@
 
 ---
 
-## 🚀 Setup & Installation
+## Setup & Installation
 
 Get up and running in seconds. RSN DB is a single package with everything baked in.
 
@@ -23,17 +23,16 @@ pip install rsn_db
 
 ---
 
-## ✨ Features
+## Features
 
-- **🛡️ Insane Safety**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
-- **🎭 Dynamic Personality**: Choose between **Professional**, **Friendly**, or **Snarky** modes.
-- **💻 Interactive CLI**: A powerful REPL with syntax highlighting (simulated) and natural language queries.
-- **🧠 GraphRAG**: Built-in knowledge retrieval engine without the LLM overhead.
-- **⚡ High Performance**: Powered by Rust, utilizing `bincode` for O(1) serialization and optimized indexes.
+- **Safety**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
+- **CLI**: A powerful REPL with syntax highlighting (simulated) and natural language queries.
+- **GraphRAG**: Built-in knowledge retrieval engine without the LLM overhead.
+- **Speed and Optimization**: Powered by Rust, utilizing `bincode` for O(1) serialization and optimized indexes.
 
 ---
 
-## 🎮 Interactive Session
+## Interactive Session
 
 Watch RSN DB in action. Here we use the **Snarky** mode to create a table, insert data, and run a query.
 
@@ -41,7 +40,7 @@ Watch RSN DB in action. Here we use the **Snarky** mode to create a table, inser
 
 ---
 
-## 📖 Quickstart
+## Quickstart
 
 ### Python Library
 The library is "all business"—no snark, just performance.
@@ -72,7 +71,7 @@ rsn
 
 ---
 
-## 🔒 Security & Safety
+## Security & Safety
 
 RSN DB is built with a security-first mindset:
 - **Encryption at Rest**: AES-256-GCM for all data.
@@ -82,7 +81,7 @@ RSN DB is built with a security-first mindset:
 
 ---
 
-## 🕸️ GraphRAG (New in v0.2.x)
+## GraphRAG (New in v0.2.x)
 
 Ingest unstructured text and query relationships directly.
 
@@ -94,5 +93,5 @@ print(db.graph_query("Who created RSN DB?"))
 ---
 
 <div align="center">
-  <sub>Built with ❤️ and 🦀 by the RSN DB Contributors</sub>
+  <sub>Built with 🦀 by Enderchefcoder</sub>
 </div>
