@@ -47,7 +47,23 @@ pip install 'rsn_db[mempalace]'
 pip install 'rsn_db[dev]'
 ```
 
-Requires **Python 3.9+**. Prebuilt wheels are published for common Linux targets; other platforms build from source via maturin (Rust toolchain required).
+Requires **Python 3.9+**.
+### Windows (cmd / PowerShell)
+
+Prebuilt wheels are published for **Windows** (`win_amd64`). Install with:
+
+```powershell
+pip install -U rsn_db
+rsn-db --version
+```
+
+If `pip` appears **stuck at "Building wheel"**, it is compiling Rust from source because no wheel matched your platform/Python. Either:
+
+1. **Upgrade** to the latest version (needs a published Windows wheel): `pip install -U rsn_db`
+2. **Use the alias** after install: `rsn-db` (not `rsn`) if another program owns that name
+3. **Or** install [Rust](https://rustup.rs/) + [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and wait several minutes for the source build to finish
+
+ Prebuilt wheels are published for common Linux targets; other platforms build from source via maturin (Rust toolchain required).
 
 ---
 

@@ -1,5 +1,15 @@
 # Patch Notes
 
+## [v0.4.5] - 2026-05-29
+### Fixed
+- **Windows pip install freeze**: publish `win_amd64` wheels (abi3, Python 3.9+). Previously only Linux wheels existed, forcing a long Rust source compile on Windows.
+
+### Changed
+- Wheels use **abi3** (`cp39-abi3`) for one wheel per platform across Python 3.9–3.12.
+- GitHub Actions `build-wheels.yml` builds Linux, Windows, and macOS wheels.
+
+---
+
 ## [v0.4.4] - 2026-05-29
 ### Added
 - **`rsn-db` console script** — Windows-friendly alias for `rsn` (same CLI; avoids cmd/PowerShell name conflicts).

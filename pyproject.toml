@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rsn_db"
-version = "0.4.4"
+version = "0.4.5"
 description = "Rust-powered embedded database for Python: encryption, GraphRAG, MemPalace AI memory, and an agent-friendly CLI"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -36,6 +36,7 @@ Documentation = "https://github.com/Enderchefcoder/RSN_DB#documentation"
 Repository = "https://github.com/Enderchefcoder/RSN_DB"
 
 [tool.maturin]
+abi3 = true
 python-source = "python"
 module-name = "rsn_db._core"
 features = ["pyo3/extension-module"]
