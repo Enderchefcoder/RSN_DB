@@ -42,10 +42,12 @@ rsn_db
 
 ## CLI reference
 
+Two console scripts are installed: `rsn` and `rsn-db` (identical). On Windows cmd/PowerShell, prefer **`rsn-db`** if `rsn` conflicts with another program.
+
 ```bash
-rsn --help
-rsn --no-prompt -c "SHOW TABLES"
-rsn --mode professional --storage ./data.rsndb
+rsn-db --help
+rsn-db --no-prompt -c "SHOW TABLES"
+rsn-db --mode professional --storage ./data.rsndb
 ```
 
 Personality modes: `professional` · `friendly` · `snarky`
