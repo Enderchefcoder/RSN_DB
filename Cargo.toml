@@ -1,6 +1,6 @@
 [package]
 name = "rsn_db"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "A lightweight Rust-powered embedded database exposed as a Python package"
 license = "MIT"

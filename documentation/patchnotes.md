@@ -1,5 +1,12 @@
 # Patch Notes
 
+## [v0.4.3] - 2026-05-29
+### Changed
+- **Documentation overhaul**: Professional README for PyPI/GitHub, documentation index, refreshed examples.
+- Package metadata and project description updated for clarity.
+
+---
+
 ## [v0.4.2] - 2026-05-29
 ### Added
 - **100% Python wrapper test coverage** (`fail_under=99`, 73+ tests).
