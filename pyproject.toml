@@ -44,5 +44,11 @@ source = ["python/rsn_db"]
 omit = ["*/_core*"]
 
 [tool.coverage.report]
-fail_under = 75
+fail_under = 99
+exclude_lines = [
+    "pragma: no cover",
+    'if __name__ == "__main__":',
+    "raise SystemExit",
+]
+
 show_missing = true

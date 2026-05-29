@@ -33,7 +33,10 @@ def _handle_mempalace(line: str, prefs: dict) -> bool:
     try:
         from rsn_db.mempalace_bridge import MemPalaceBridge, MEMPALACE_INSTALL
     except ImportError:
-        print(f"MemPalace unavailable. {MEMPALACE_INSTALL}", file=sys.stderr)
+        print(
+            "MemPalace unavailable. pip install 'rsn_db[mempalace]'",
+            file=sys.stderr,
+        )
         return True
     bridge = MemPalaceBridge(palace_path=prefs.get("mempalace_path"))
     parts = upper.split(maxsplit=2)
