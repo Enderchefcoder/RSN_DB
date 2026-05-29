@@ -26,11 +26,11 @@ jobs:
         with:
           python-version: "3.x"
 
+      - uses: dtolnay/rust-toolchain@stable
       - name: Build release distributions
         run: |
-          # NOTE: put your own distribution build steps here.
-          python -m pip install build
-          python -m build
+          pip install maturin
+          maturin build --release -o dist/
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4

@@ -431,7 +431,7 @@ impl Database {
             batch_mode: false,
             batch_ops: Vec::new(),
         };
-        db.load()?;
+        db.reload_from_disk()?;
         Ok(db)
     }
 
@@ -946,10 +946,35 @@ impl Database {
         self.persist()?;
         Ok(n)
     }
+
+    fn save(&self) -> PyResult<()> {
+        self.persist()
+    }
+
+    fn load(&mut self) -> PyResult<()> {
+        self.reload_from_disk()
+    }
+
+    fn snapshot(&self, dest: String) -> PyResult<()> {
+        let src = self
+            .storage_path
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("snapshot requires storage_path"))?;
+        if !src.exists() {
+            self.persist()?;
+        }
+        let output_path = sanitize_user_path(&dest)?;
+        let bytes = fs::read(src).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        }
+        fs::write(output_path, bytes).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        Ok(())
+    }
 }
 
 impl Database {
-    fn load(&mut self) -> PyResult<()> {
+    fn reload_from_disk(&mut self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
             if p.exists() {
                 let b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
@@ -979,7 +1004,7 @@ impl Database {
                     }
                     CompressionAlgo::None => {}
                 }
-                self.engine = bincode::deserialize(&data)
+                self.engine = serde_json::from_slice(&data)
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 self.engine.rebuild_cache();
             }
@@ -988,7 +1013,7 @@ impl Database {
     }
     fn persist(&self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
-            let mut b = bincode::serialize(&self.engine)
+            let mut b = serde_json::to_vec(&self.engine)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
             match self.compression {
                 CompressionAlgo::Zstd => {

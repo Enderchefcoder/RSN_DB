@@ -1,0 +1,26 @@
+name: CI
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -- -D warnings -A clippy::must_use_candidate -A clippy::missing_errors_doc
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install maturin pytest pytest-cov "mempalace>=3.3.5,<4"
+      - run: maturin develop --release
+      - run: pytest tests/ -q --cov=rsn_db --cov-fail-under=45

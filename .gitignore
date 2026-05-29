@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 target/
 Cargo.lock
+
+.coverage
+dist/
+

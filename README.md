@@ -51,15 +51,7 @@ from rsn_db import Database
 # Initialize with encryption
 db = Database(storage_path="data.rsn", encryption_key="super-secret")
 
-# Create a table
-db.create_table("users", {"name": {"type": "string", "required": True}})
-
-# Insert data
-db.insert("users", {"name": "Alice", "age": 30})
-
-# Query data
-results = db.execute_sql("FIND users WHERE age > 20")
-print(results)
+db.save()  # flush to disk
 ```
 
 ### CLI

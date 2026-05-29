@@ -4,19 +4,35 @@ build-backend = "maturin"
 
 [project]
 name = "rsn_db"
-version = "0.2.2"
-description = "Rust-powered embedded database for Python"
+version = "0.3.0"
+description = "Rust-powered embedded database for Python with optional MemPalace AI memory"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "RSN DB Contributors" }]
+license = { text = "MIT" }
+keywords = ["database", "embedded", "rust", "mempalace", "graphrag", "ai-memory"]
 classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Rust",
   "License :: OSI Approved :: MIT License",
+  "Development Status :: 4 - Beta",
+]
+
+[project.optional-dependencies]
+mempalace = ["mempalace>=3.3.5,<4"]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "mempalace>=3.3.5,<4",
 ]
 
 [project.scripts]
 rsn = "rsn_db.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Enderchefcoder/rsn_db"
+Documentation = "https://github.com/Enderchefcoder/rsn_db#documentation"
+Repository = "https://github.com/Enderchefcoder/rsn_db"
 
 [tool.maturin]
 python-source = "python"
