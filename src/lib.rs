@@ -1,6 +1,7 @@
 pub mod alive;
 pub mod graph_rag;
 pub mod personality;
+pub mod snark_pool;
 
 const MAX_RECURSION_DEPTH: usize = 64;
 const MAX_COMMAND_LENGTH: usize = 4096;

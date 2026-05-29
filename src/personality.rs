@@ -1,3 +1,4 @@
+use crate::snark_pool::EXTRA_SNARK;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
@@ -32,8 +33,8 @@ impl Personality {
     }
 
     fn pick(&self, options: &[&str]) -> String {
-        options
-            .choose(&mut thread_rng())
+        let pool: Vec<&str> = options.iter().copied().chain(EXTRA_SNARK.iter().copied()).collect();
+        pool.choose(&mut thread_rng())
             .unwrap_or(&"Error generating sarcasm. Even my snark module is disappointed in you.")
             .to_string()
     }
