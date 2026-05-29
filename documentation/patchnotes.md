@@ -1,5 +1,15 @@
 # Patch Notes
 
+## [v0.4.2] - 2026-05-29
+### Added
+- **100% Python wrapper test coverage** (`fail_under=99`, 73+ tests).
+- CLI fix when MemPalace is not installed (no crash on import error).
+
+### Changed
+- `rsn_db.beginners` exported from package root.
+
+---
+
 ## [v0.4.0] - 2026-05-29
 ### Added
 - **Alive system**: `PULSE`, `MOOD`, `VITALS`; mood tracking and ambient snark.
