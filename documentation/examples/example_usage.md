@@ -106,11 +106,13 @@ See [mempalace.md](../mempalace.md).
 
 ## 7. CLI — one-shot commands
 
+Use `rsn` or `rsn-db` (identical; prefer `rsn-db` on Windows when `rsn` conflicts):
+
 ```bash
-rsn --no-prompt -c "SHOW TABLES"
-rsn --storage ./demo.rsndb -c "INGEST RSN DB supports GraphRAG."
-rsn --mode snarky -c "PULSE"
-rsn --json -c "COUNT users"
+rsn-db --no-prompt -c "SHOW TABLES"
+rsn-db --storage ./demo.rsndb -c "INGEST RSN DB supports GraphRAG."
+rsn-db --mode snarky -c "PULSE"
+rsn-db --json -c "COUNT users"
 ```
 
 ---
@@ -118,10 +120,10 @@ rsn --json -c "COUNT users"
 ## 8. CLI — MemPalace
 
 ```bash
-rsn -c "MEMPALACE HELP"
-rsn -c "MEMPALACE REMEMBER Deploy only on Tuesdays"
-rsn -c "MEMPALACE SEARCH deploy"
-rsn -c "MEMPALACE STATUS"
+rsn-db -c "MEMPALACE HELP"
+rsn-db -c "MEMPALACE REMEMBER Deploy only on Tuesdays"
+rsn-db -c "MEMPALACE SEARCH deploy"
+rsn-db -c "MEMPALACE STATUS"
 ```
 
 ---

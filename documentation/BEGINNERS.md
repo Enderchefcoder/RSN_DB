@@ -43,10 +43,12 @@ mem.save()
 
 ## REPL tips
 
+Use `rsn` or `rsn-db` (same CLI; on Windows prefer `rsn-db` if `rsn` is taken):
+
 ```bash
-rsn --mode snarky -c "PULSE"
-rsn --storage ./data.rsndb -c "SHOW TABLES"
-rsn --help
+rsn-db --mode snarky -c "PULSE"
+rsn-db --storage ./data.rsndb -c "SHOW TABLES"
+rsn-db --help
 ```
 
 Snarky mode includes **100+ extra remarks**, mood tracking (`MOOD`), and ambient lines (`PULSE`, `VITALS`).

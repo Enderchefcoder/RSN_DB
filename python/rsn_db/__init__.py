@@ -6,7 +6,7 @@ from . import beginners
 from .easy import RsnDatabase, open_db
 from .mempalace_bridge import MemPalaceBridge, MEMPALACE_INSTALL, OFFICIAL_DOCS
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 __all__ = [
     "Database",

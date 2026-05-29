@@ -43,3 +43,11 @@ python -c "from rsn_db import Database; print(Database())"
 
 - Package install name is `rsn_db`, while the Rust extension module remains `rsn_db._core`.
 - Build from a clean git state and increment versions in both `Cargo.toml` and `pyproject.toml` before each release.
+## Console scripts
+
+After install, two entry points are available:
+
+- `rsn` — default CLI name
+- `rsn-db` — same program; use on Windows when `rsn` conflicts with another command
+
+Both invoke `rsn_db.cli:main`.

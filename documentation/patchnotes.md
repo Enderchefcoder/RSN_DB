@@ -1,5 +1,15 @@
 # Patch Notes
 
+## [v0.4.4] - 2026-05-29
+### Added
+- **`rsn-db` console script** — Windows-friendly alias for `rsn` (same CLI; avoids cmd/PowerShell name conflicts).
+- CLI help shows the invoked command name and documents the Windows alternative.
+
+### Changed
+- Documentation updated for dual entry points.
+
+---
+
 ## [v0.4.3] - 2026-05-29
 ### Changed
 - **Documentation overhaul**: Professional README for PyPI/GitHub, documentation index, refreshed examples.

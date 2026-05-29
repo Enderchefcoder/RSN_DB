@@ -12,6 +12,16 @@ from rsn_db._core import Database
 
 PREFS_FILE = Path.home() / ".rsn_preferences"
 
+CLI_COMMANDS = ("rsn", "rsn-db")
+
+
+def cli_prog_name(argv: list[str] | None = None) -> str:
+    """Return ``rsn-db`` when invoked via that entry point (Windows-friendly)."""
+    invoked = Path((argv or sys.argv)[0]).name.lower()
+    if invoked.startswith("rsn-db"):
+        return "rsn-db"
+    return "rsn"
+
 
 def load_prefs() -> dict:
     if PREFS_FILE.exists():
@@ -105,14 +115,19 @@ def run_repl(db: Database, prefs: dict, *, json_out: bool) -> None:
             print(exc, file=sys.stderr)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    name = prog or cli_prog_name()
     parser = argparse.ArgumentParser(
-        prog="rsn",
+        prog=name,
         description="RSN DB interactive shell and one-shot SQL runner.",
-        epilog="Examples:\n"
-        "  rsn -c 'SHOW TABLES'\n"
-        "  rsn --mode snarky\n"
-        "  rsn --storage ./app.rsndb -c 'PULSE'",
+        epilog=(
+            "Examples:\n"
+            f"  {{name}} -c 'SHOW TABLES'\n"
+            f"  {{name}} --mode snarky\n"
+            f"  {{name}} --storage ./app.rsndb -c 'PULSE'\n\n"
+            "On Windows, if ``rsn`` conflicts with another program, use ``rsn-db`` "
+            "(same command; installed as a second console script)."
+        ).format(name=name),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"rsn_db {__version__}")
@@ -137,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
     prefs = load_prefs()
     mode = args.mode or prefs.get("mode")

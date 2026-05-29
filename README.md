@@ -102,19 +102,28 @@ See [documentation/BEGINNERS.md](documentation/BEGINNERS.md) for a guided walkth
 
 ## CLI
 
+Two console commands are installed — same program, pick either:
+
+| Command | When to use |
+|---------|-------------|
+| `rsn` | Default on macOS/Linux |
+| `rsn-db` | **Recommended on Windows** if `rsn` conflicts with another tool in cmd/PowerShell |
+
 Interactive shell:
 
 ```bash
 rsn
+# Windows alternative:
+rsn-db
 ```
 
 **Automation / agents**
 
 ```bash
 rsn --no-prompt -c "SHOW TABLES"
-rsn --mode snarky -c "PULSE"
-rsn --storage ./app.rsndb --json -c "COUNT users"
-rsn --help
+rsn-db --mode snarky -c "PULSE"
+rsn-db --storage ./app.rsndb --json -c "COUNT users"
+rsn-db --help
 ```
 
 **REPL commands** (non-exhaustive)
