@@ -1,3 +1,4 @@
+pub mod alive;
 pub mod graph_rag;
 pub mod personality;
 
@@ -274,6 +275,7 @@ struct Engine {
     tables: HashMap<String, Table>,
     aliases: HashMap<String, String>,
     graph_rag: GraphRagEngine,
+    alive: alive::AliveState,
 }
 
 impl Engine {
@@ -282,6 +284,7 @@ impl Engine {
             tables: HashMap::new(),
             aliases: HashMap::new(),
             graph_rag: GraphRagEngine::new(),
+            alive: alive::AliveState::default(),
         }
     }
     fn rebuild_cache(&mut self) {
@@ -607,7 +610,13 @@ impl Database {
     }
 
     fn execute_sql(&mut self, py: Python<'_>, sql: String) -> PyResult<PyObject> {
-        self.execute_sql_recursive(py, sql, 0)
+        let out = self.execute_sql_recursive(py, sql, 0)?;
+        if let Some(whisper) = self.engine.alive.ambient(self.personality.mode()) {
+            if let Ok(s) = out.extract::<String>(py) {
+                return Ok(format!("{}\n  {}", s, whisper).into_py(py));
+            }
+        }
+        Ok(out)
     }
 
     fn execute_sql_recursive(
@@ -642,6 +651,9 @@ impl Database {
             self.command_history.push(sql.clone());
         }
         let toks: Vec<&str> = sql.split_whitespace().collect();
+        if depth == 0 && !toks.is_empty() {
+            self.engine.alive.on_command();
+        }
         if toks.is_empty() {
             let empty_count = self
                 .command_history
@@ -745,14 +757,37 @@ impl Database {
                 Ok(self.personality.why_mean().into_py(py))
             }
             "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
+            "PULSE" => {
+                self.engine.alive.on_success();
+                Ok(self.engine.alive.pulse(self.personality.mode()).into_py(py))
+            }
+            "MOOD" => {
+                self.engine.alive.on_success();
+                Ok(format!(
+                    "{} (score {})",
+                    self.engine.alive.mood_label(),
+                    self.engine.alive.mood_score
+                )
+                .into_py(py))
+            }
+            "VITALS" => {
+                self.engine.alive.on_success();
+                Ok(self.engine.alive.vitals_json().into_py(py))
+            }
             _ => {
                 if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
                     return self.execute_sql_recursive(py, translated.clone(), depth + 1);
                 }
                 if toks[0] == "DELTE" {
+                    if depth == 0 {
+                        self.engine.alive.on_error();
+                    }
                     return Err(PyValueError::new_err(
                         self.personality.typo_suggestion("DELTE", "DELETE"),
                     ));
+                }
+                if depth == 0 {
+                    self.engine.alive.on_error();
                 }
                 Err(PyRuntimeError::new_err(
                     self.personality.error("unknown command"),
@@ -1214,3 +1249,7 @@ fn _core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Record>()?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod lib_tests;

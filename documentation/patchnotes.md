@@ -1,5 +1,15 @@
 # Patch Notes
 
+## [v0.4.0] - 2026-05-29
+### Added
+- **Alive system**: `PULSE`, `MOOD`, `VITALS`; mood tracking and ambient snark.
+- **Session memory**: `SessionMemory` sidecar + optional MemPalace sync.
+- **Beginners**: `quick_start`, `insert_many` — `documentation/BEGINNERS.md`.
+- **CLI**: `rsn -c`, `--mode`, `--json`, `--version` (agent-friendly).
+- **Tests**: 40 pytest cases; expanded Rust module tests in `alive` / `graph_rag`.
+
+---
+
 ## [v0.3.0] - 2026-05-29
 ### Added
 - **Official MemPalace integration** (`pip install rsn_db[mempalace]`): bridge to [MemPalace/mempalace](https://github.com/MemPalace/mempalace) — search, remember, wake-up, mine, init. See [documentation/mempalace.md](mempalace.md).

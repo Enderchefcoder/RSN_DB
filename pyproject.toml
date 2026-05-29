@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rsn_db"
-version = "0.3.0"
+version = "0.4.0"
 description = "Rust-powered embedded database for Python with optional MemPalace AI memory"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,11 +30,19 @@ dev = [
 rsn = "rsn_db.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Enderchefcoder/rsn_db"
-Documentation = "https://github.com/Enderchefcoder/rsn_db#documentation"
-Repository = "https://github.com/Enderchefcoder/rsn_db"
+Homepage = "https://github.com/Enderchefcoder/RSN_DB"
+Documentation = "https://github.com/Enderchefcoder/RSN_DB#documentation"
+Repository = "https://github.com/Enderchefcoder/RSN_DB"
 
 [tool.maturin]
 python-source = "python"
 module-name = "rsn_db._core"
 features = ["pyo3/extension-module"]
+
+[tool.coverage.run]
+source = ["python/rsn_db"]
+omit = ["*/_core*"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true

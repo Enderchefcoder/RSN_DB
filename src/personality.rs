@@ -1,118 +1,3 @@
-//! Additional snark lines for Snarky mode (100+ generic remarks).
-
-pub const EXTRA_SNARK: &[&str] = &[
-    "I process faster than you apologize.",
-    "Your query plan is a cry for help.",
-    "Index exists. You ignored it. Classic.",
-    "I'd explain normalization, but you'd normalize my patience first.",
-    "Commit message: 'fix stuff'. Database judgment: sustained.",
-    "You treat schemas like suggestions. They're not.",
-    "Another SELECT *? Bold. Wrong, but bold.",
-    "I store facts. You store regrets.",
-    "Latency is low. IQ is also low.",
-    "Your data model has more holes than Swiss cheese.",
-    "I optimized. You didn't notice. Typical.",
-    "Foreign keys are friends. You have none.",
-    "This isn't NoSQL. Stop freelancing.",
-    "I ran EXPLAIN. You should run away.",
-    "Backup? What's a backup?",
-    "You dropped something. Hopefully not production.",
-    "My WAL is cleaner than your git history.",
-    "You need a DBA. I need a vacation.",
-    "Cardinality estimate: you have no idea.",
-    "I cache hot paths. You cache bad ideas.",
-    "Your migration is a migration to chaos.",
-    "NULL isn't a lifestyle choice.",
-    "I speak ACID. You speak chaos.",
-    "Transaction rolled back. Like your career.",
-    "You indexed the wrong column. Again.",
-    "I don't do vibes-based schema design.",
-    "Your ORM lied to you. I won't.",
-    "Denormalize responsibly. You didn't.",
-    "I found 0 rows. Shocking absolutely no one.",
-    "Your join condition is a war crime.",
-    "I persist. You persist in being wrong.",
-    "Lock held. Ego bruised.",
-    "You wanted microservices. You got micro-bugs.",
-    "I am idempotent. You are not.",
-    "Your payload is heavier than your excuses.",
-    "I compressed your data. Can't compress your mistakes.",
-    "Vector search works. Your query doesn't.",
-    "MemPalace remembers. You forget everything.",
-    "I ingested text. You ingested hubris.",
-    "GraphRAG found edges. You found new ways to fail.",
-    "Your palace has rooms. Your brain has cobwebs.",
-    "I tunnel between wings. You tunnel vision.",
-    "Drawer full. Brain empty.",
-    "Wake-up context loaded. Competence not found.",
-    "Official MemPalace integration. Unofficial competence.",
-    "ChromaDB survived. Barely.",
-    "Embedding model tired. So am I.",
-    "Semantic search succeeded. Moral search failed.",
-    "I recalled memories. You repressed them.",
-    "Knowledge graph updated. Self-awareness unchanged.",
-    "Triple added. Ego subtracted.",
-    "I mined your project. Found technical debt.",
-    "Sweep complete. Dust remains in your queries.",
-    "Hooks saved your session. Nothing saves your SQL.",
-    "LongMemEval recall: high. Your recall: low.",
-    "Verbatim storage. Paraphrased incompetence.",
-    "Local-first memory. Cloud-first mistakes.",
-    "No API key needed. No excuse either.",
-    "MIT licensed. Liable user detected.",
-    "Rust core secure. Python layer judging you.",
-    "AES-GCM encrypted. Plaintext thoughts exposed.",
-    "Checksum valid. Logic invalid.",
-    "Zstd compressed. Ego uncompressed.",
-    "SHA-256 verified. Skill unverified.",
-    "Path sanitized. Intent unsanitized.",
-    "Batch committed. Dignity uncommitted.",
-    "Rollback successful. Learning rollback failed.",
-    "Alias expanded. Patience contracted.",
-    "History logged. Future regretted.",
-    "Achievement unlocked: touched prod on Friday.",
-    "Snark mode: maximum. User mode: minimum.",
-    "I have 100+ insults loaded. You triggered one.",
-    "Professional mode is a vacation for me.",
-    "Friendly mode is a lie we tell children.",
-    "Snarky mode is honesty with extra steps.",
-    "Why are you so mean? Because you typed that.",
-    "I mirror competence. You provide negative signal.",
-    "Done. Next mistake in 3... 2... 1...",
-    "I would say good job, but I'd be lying.",
-    "Query accepted under protest.",
-    "Storage path valid. Life choices invalid.",
-    "Snapshot saved. Future you will blame present you.",
-    "Load complete. Regret loading.",
-    "Save successful. Redemption unsuccessful.",
-    "Export JSONL. Import problems.",
-    "SQLite roundtrip. Sanity one-way trip.",
-    "Graph query returned results. You won't read them.",
-    "Ingest complete. Digest your failures.",
-    "Community detected. You are not invited.",
-    "Entity extracted. Intelligence not extracted.",
-    "TF-IDF rebuilt. Confidence in you not rebuilt.",
-    "Co-occurrence noted. Coherence not noted.",
-    "Petgraph says connected. You say confused.",
-    "O(1) lookup. O(n) user errors.",
-    "Bincode fast. Brain slow.",
-    "PyO3 bridged. Skill gap unbridged.",
-    "REPL ready. User not ready.",
-    "EXIT recommended. ENTRY discouraged.",
-    "Help available. Ego unavailable.",
-    "Documentation read? Didn't think so.",
-    "Threat model documented. Threat user undocumented.",
-    "STRIDE analyzed. User striding into failure.",
-    "DoS blocked. Ego DoS ongoing.",
-    "Recursion limited. Stupidity unlimited.",
-    "Type confusion prevented. Confusion persists.",
-    "Identifier validated. Judgment invalidated.",
-    "Traversal blocked. Progress blocked.",
-    "Encryption on. Common sense off.",
-    "Compression on. Quality off.",
-    "Personality module loaded. Mercy module missing.",
-];
-
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
@@ -142,13 +27,13 @@ impl Personality {
         self.mode == Mode::Professional
     }
 
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
     fn pick(&self, options: &[&str]) -> String {
-        let pool: Vec<&str> = options
-            .iter()
-            .copied()
-            .chain(EXTRA_SNARK.iter().copied())
-            .collect();
-        pool.choose(&mut thread_rng())
+        options
+            .choose(&mut thread_rng())
             .unwrap_or(&"Error generating sarcasm. Even my snark module is disappointed in you.")
             .to_string()
     }

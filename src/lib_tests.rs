@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use crate::alive::AliveState;
     use crate::graph_rag::GraphRagEngine;
     use crate::personality::{Mode, Personality};
     use crate::{sanitize_relative_path, validate_identifier, DbError, Engine, FieldDef, FieldType, Table};
     use serde_json::{json, Map};
+    use std::collections::HashMap;
 
     #[test]
     fn field_type_from_str_and_coerce() {
@@ -25,7 +27,6 @@ mod tests {
 
     #[test]
     fn table_unique_violation() {
-        use std::collections::HashMap;
         let mut schema = HashMap::new();
         schema.insert(
             "email".to_string(),
@@ -43,17 +44,29 @@ mod tests {
     }
 
     #[test]
-    fn graph_rag_ingest_and_query() {
-        let mut g = GraphRagEngine::new();
-        g.ingest("Alice works at RSN DB.", "src");
-        let out = g.query("Alice");
-        assert!(!out.is_empty());
+    fn engine_has_alive_state() {
+        let engine = Engine::new();
+        assert_eq!(engine.alive.commands_total, 0);
     }
 
     #[test]
-    fn personality_snark_pick_non_empty() {
+    fn graph_rag_ingest_and_query() {
+        let mut g = GraphRagEngine::new();
+        g.ingest("Alice works at RSN DB.", "src");
+        assert!(!g.query("Alice").is_empty());
+    }
+
+    #[test]
+    fn personality_snark_uses_extra_pool() {
         let p = Personality::new(Mode::Snarky);
         let msg = p.success("done");
         assert!(msg.contains('✓'));
+    }
+
+    #[test]
+    fn alive_mood_and_pulse() {
+        let mut a = AliveState::default();
+        a.on_success();
+        assert!(!a.pulse(Mode::Professional).is_empty());
     }
 }

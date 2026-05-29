@@ -1,13 +1,19 @@
+"""RSN DB CLI — agent-friendly (non-interactive flags, clear help)."""
+
+from __future__ import annotations
+
+import argparse
 import json
 import sys
 from pathlib import Path
 
+from rsn_db import __version__
 from rsn_db._core import Database
 
 PREFS_FILE = Path.home() / ".rsn_preferences"
 
 
-def load_prefs():
+def load_prefs() -> dict:
     if PREFS_FILE.exists():
         try:
             return json.loads(PREFS_FILE.read_text())
@@ -16,7 +22,7 @@ def load_prefs():
     return {}
 
 
-def save_prefs(prefs):
+def save_prefs(prefs: dict) -> None:
     PREFS_FILE.write_text(json.dumps(prefs))
 
 
@@ -27,7 +33,7 @@ def _handle_mempalace(line: str, prefs: dict) -> bool:
     try:
         from rsn_db.mempalace_bridge import MemPalaceBridge, MEMPALACE_INSTALL
     except ImportError:
-        print(f"MemPalace integration unavailable. {MEMPALACE_INSTALL}")
+        print(f"MemPalace unavailable. {MEMPALACE_INSTALL}", file=sys.stderr)
         return True
     bridge = MemPalaceBridge(palace_path=prefs.get("mempalace_path"))
     parts = upper.split(maxsplit=2)
@@ -36,13 +42,8 @@ def _handle_mempalace(line: str, prefs: dict) -> bool:
     try:
         if sub in ("HELP", "?"):
             print(
-                "MemPalace (official — mempalaceofficial.com):\n"
-                "  MEMPALACE SEARCH <query>\n"
-                "  MEMPALACE REMEMBER <text>\n"
-                "  MEMPALACE WAKEUP\n"
-                "  MEMPALACE STATUS\n"
-                "  MEMPALACE INIT [dir]\n"
-                "  MEMPALACE MINE <path>\n"
+                "Official MemPalace (mempalaceofficial.com):\n"
+                "  MEMPALACE SEARCH|REMEMBER|WAKEUP|STATUS|INIT|MINE"
             )
         elif sub == "SEARCH" and rest:
             print(bridge.search_text(rest))
@@ -57,57 +58,112 @@ def _handle_mempalace(line: str, prefs: dict) -> bool:
         elif sub == "MINE" and rest:
             print(bridge.mine_path(rest.strip()))
         else:
-            print(f"Unknown or incomplete MEMPALACE command: {sub}")
+            print(f"Unknown MEMPALACE command: {sub}", file=sys.stderr)
     except Exception as exc:
-        print(f"MemPalace error: {exc}")
+        print(f"MemPalace error: {exc}", file=sys.stderr)
     return True
 
 
-def main():
-    prefs = load_prefs()
-    mode = prefs.get("mode")
-    if not mode:
-        print("Select mode:")
-        print("  [1] Professional (clean, minimal output)")
-        print("  [2] Friendly     (helpful with personality)")
-        print("  [3] Snarky       (full commentary enabled)")
-        choice = input("\nChoice (default: 1): ").strip()
-        mode = {"2": "friendly", "3": "snarky"}.get(choice, "professional")
-        if input("Remember this choice? (y/n): ").strip().lower() == "y":
-            prefs["mode"] = mode
-            save_prefs(prefs)
+def _print_result(result, *, as_json: bool) -> None:
+    if not result:
+        return
+    if as_json:
+        print(json.dumps(result, default=str))
+        return
+    if isinstance(result, list):
+        for item in result:
+            print(f" • {item}")
+    else:
+        print(result)
 
-    db = Database(storage_path=prefs.get("storage_path"), mode=mode)
-    print("✓ Snarky mode enabled.\n  Don't say I didn't warn you.\n" if mode == "snarky" else (
-        "✓ Friendly mode enabled. Let's build something cool!\n" if mode == "friendly"
-        else "RSN DB v0.3.0 (Professional Mode)\n"
-    ))
-    print("Type HELP or MEMPALACE HELP. EXIT to quit.")
 
+def run_repl(db: Database, prefs: dict, *, json_out: bool) -> None:
+    print("Type HELP, MEMPALACE HELP, PULSE, MOOD, VITALS. EXIT to quit.")
     while True:
         try:
             line = input("rsn> ").strip()
-            if line.upper() == "EXIT":
-                db.save()
-                print("\n  See you next time.\n")
-                break
-            if _handle_mempalace(line, prefs):
-                continue
-            if line.upper() == "HELP":
-                print("TABLES | COUNT | INGEST | GRAPH_QUERY | BATCH | MEMPALACE HELP")
-                continue
-            result = db.execute_sql(line)
-            if result:
-                if isinstance(result, list):
-                    for item in result:
-                        print(f" • {item}")
-                else:
-                    print(result)
         except EOFError:
             break
-        except Exception as e:
-            print(e)
+        if line.upper() == "EXIT":
+            db.save()
+            print("Goodbye.")
+            break
+        if _handle_mempalace(line, prefs):
+            continue
+        if line.upper() == "HELP":
+            print(
+                "TABLES | COUNT | INGEST | GRAPH_QUERY | BATCH | COMMIT | ROLLBACK\n"
+                "PULSE | MOOD | VITALS | ACHIEVEMENT | MEMPALACE HELP"
+            )
+            continue
+        try:
+            _print_result(db.execute_sql(line), as_json=json_out)
+        except Exception as exc:
+            print(exc, file=sys.stderr)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rsn",
+        description="RSN DB interactive shell and one-shot SQL runner.",
+        epilog="Examples:\n"
+        "  rsn -c 'SHOW TABLES'\n"
+        "  rsn --mode snarky\n"
+        "  rsn --storage ./app.rsndb -c 'PULSE'",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--version", action="version", version=f"rsn_db {__version__}")
+    parser.add_argument(
+        "-c",
+        "--command",
+        help="Run a single SQL/REPL command and exit (non-interactive).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["professional", "friendly", "snarky"],
+        help="Personality mode (overrides saved preference).",
+    )
+    parser.add_argument("--storage", help="Path to .rsndb storage file.")
+    parser.add_argument("--json", action="store_true", help="Emit command results as JSON.")
+    parser.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="Skip interactive mode selection on first run.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    prefs = load_prefs()
+    mode = args.mode or prefs.get("mode")
+    if not mode and not args.no_prompt and not args.command:
+        print("Select mode: [1] Professional  [2] Friendly  [3] Snarky")
+        choice = input("Choice (default 1): ").strip()
+        mode = {"2": "friendly", "3": "snarky"}.get(choice, "professional")
+        if input("Remember? (y/n): ").strip().lower() == "y":
+            prefs["mode"] = mode
+            save_prefs(prefs)
+    mode = mode or "professional"
+    storage = args.storage or prefs.get("storage_path")
+    db = Database(storage_path=storage, mode=mode)
+
+    if args.command:
+        if _handle_mempalace(args.command, prefs):
+            return 0
+        try:
+            _print_result(db.execute_sql(args.command), as_json=args.json)
+            db.save()
+            return 0
+        except Exception as exc:
+            print(exc, file=sys.stderr)
+            return 1
+
+    if mode == "snarky":
+        print(db.execute_sql("PULSE") or "Snarky mode on.")
+    run_repl(db, prefs, json_out=args.json)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
