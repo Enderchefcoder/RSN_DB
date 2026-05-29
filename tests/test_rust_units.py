@@ -1,4 +1,4 @@
-"""Additional coverage for v0.4.5 Python surface."""
+"""Additional coverage for v0.4.6 Python surface."""
 
 from unittest.mock import patch
 
@@ -8,7 +8,7 @@ from rsn_db import Database, Query, RsnDatabase, __version__
 
 
 def test_version():
-    assert __version__ == "0.4.5"
+    assert __version__ == "0.4.6"
 
 
 def test_snarky_create_table_message(tmp_path):

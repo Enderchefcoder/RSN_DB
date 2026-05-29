@@ -1,5 +1,16 @@
 # Patch Notes
 
+## [v0.4.6] - 2026-05-29
+### Added
+- **Beginner-friendly HELP**: sorted commands, descriptions, section groups.
+- Snarky mode: 15 random help remarks; Friendly/Professional tips.
+
+### Changed
+- REPL prompt shows `rsn-db>` when launched via the Windows alias.
+- `HELP` works in one-shot mode (`rsn-db -c HELP`).
+
+---
+
 ## [v0.4.5] - 2026-05-29
 ### Fixed
 - **Windows pip install freeze**: publish `win_amd64` wheels (abi3, Python 3.9+). Previously only Linux wheels existed, forcing a long Rust source compile on Windows.

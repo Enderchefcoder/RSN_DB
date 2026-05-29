@@ -142,6 +142,8 @@ rsn-db --storage ./app.rsndb --json -c "COUNT users"
 rsn-db --help
 ```
 
+**REPL help** — type `HELP` in the shell for a sorted, described command list (Snarky mode adds random remarks).
+
 **REPL commands** (non-exhaustive)
 
 | Category | Examples |

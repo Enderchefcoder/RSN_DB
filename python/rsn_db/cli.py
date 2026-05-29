@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rsn_db import __version__
 from rsn_db._core import Database
+from rsn_db.help_menu import format_help, format_mempalace_help
 
 PREFS_FILE = Path.home() / ".rsn_preferences"
 
@@ -54,10 +55,7 @@ def _handle_mempalace(line: str, prefs: dict) -> bool:
     rest = parts[2] if len(parts) > 2 else ""
     try:
         if sub in ("HELP", "?"):
-            print(
-                "Official MemPalace (mempalaceofficial.com):\n"
-                "  MEMPALACE SEARCH|REMEMBER|WAKEUP|STATUS|INIT|MINE"
-            )
+            print(format_mempalace_help(prefs.get("mode", "professional")))
         elif sub == "SEARCH" and rest:
             print(bridge.search_text(rest))
         elif sub == "REMEMBER" and rest:
@@ -90,11 +88,22 @@ def _print_result(result, *, as_json: bool) -> None:
         print(result)
 
 
-def run_repl(db: Database, prefs: dict, *, json_out: bool) -> None:
-    print("Type HELP, MEMPALACE HELP, PULSE, MOOD, VITALS. EXIT to quit.")
+def run_repl(
+    db: Database,
+    prefs: dict,
+    *,
+    json_out: bool,
+    mode: str = "professional",
+    prompt: str | None = None,
+) -> None:
+    prefs = {**prefs, "mode": mode}
+    prog = prompt or cli_prog_name()
+    print(f"Type HELP for commands. MEMPALACE HELP, PULSE, MOOD, VITALS. EXIT to quit.")
+    if prog == "rsn-db":
+        print("  (Using rsn-db — Windows-friendly alias for rsn.)")
     while True:
         try:
-            line = input("rsn> ").strip()
+            line = input(f"{prog}> ").strip()
         except EOFError:
             break
         if line.upper() == "EXIT":
@@ -103,11 +112,8 @@ def run_repl(db: Database, prefs: dict, *, json_out: bool) -> None:
             break
         if _handle_mempalace(line, prefs):
             continue
-        if line.upper() == "HELP":
-            print(
-                "TABLES | COUNT | INGEST | GRAPH_QUERY | BATCH | COMMIT | ROLLBACK\n"
-                "PULSE | MOOD | VITALS | ACHIEVEMENT | MEMPALACE HELP"
-            )
+        if line.upper() in ("HELP", "?"):
+            print(format_help(mode))
             continue
         try:
             _print_result(db.execute_sql(line), as_json=json_out)
@@ -167,7 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     storage = args.storage or prefs.get("storage_path")
     db = Database(storage_path=storage, mode=mode)
 
+    prefs["mode"] = mode
     if args.command:
+        cmd_upper = args.command.strip().upper()
+        if cmd_upper in ("HELP", "?"):
+            print(format_help(mode))
+            return 0
         if _handle_mempalace(args.command, prefs):
             return 0
         try:
@@ -180,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if mode == "snarky":
         print(db.execute_sql("PULSE") or "Snarky mode on.")
-    run_repl(db, prefs, json_out=args.json)
+    run_repl(db, prefs, json_out=args.json, mode=mode)
     return 0
 
 

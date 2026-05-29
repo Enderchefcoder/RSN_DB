@@ -105,7 +105,7 @@ def test_main_snarky_starts_repl(monkeypatch):
 
     called = []
 
-    def capture_repl(db, prefs, *, json_out):
+    def capture_repl(db, prefs, *, json_out, mode="professional", prompt=None):
         called.append(json_out)
 
     monkeypatch.setattr(cli, "run_repl", capture_repl)
