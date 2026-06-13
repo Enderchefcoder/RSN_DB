@@ -1,97 +1,270 @@
 <div align="center">
-  <h1>🦀 RSN DB 🦀</h1>
-  <p><strong>A Rust-powered embedded database with a <i>personality</i>.</strong></p>
-  <p>
-    <a href="https://pypi.org/project/rsn-db/"><img src="https://img.shields.io/pypi/v/rsn-db?color=blue&logo=pypi" alt="PyPI version"></a>
-    <img alt="rust" src="https://img.shields.io/badge/Rust-1.75%2B-orange?logo=rust" />
-    <img alt="python" src="https://img.shields.io/badge/Python-3.9%2B-blue?logo=python" />
-    <img alt="license" src="https://img.shields.io/badge/License-MIT-green" />
-  </p>
+
+# RSN DB
+
+**A Rust-powered embedded database for Python — fast, secure, and optionally opinionated.**
+
+[![PyPI version](https://img.shields.io/pypi/v/rsn-db?color=blue&logo=pypi)](https://pypi.org/project/rsn-db/)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://pypi.org/project/rsn-db/)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange?logo=rust)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+[Installation](#installation) · [Quick start](#quick-start) · [Documentation](#documentation) · [Security](#security) · [Changelog](documentation/patchnotes.md)
+
 </div>
 
 ---
 
-## Setup & Installation
+RSN DB is a single-file embedded database with a native Rust engine and a Python API. Use it like a lightweight local datastore, a graph-aware knowledge store (GraphRAG), or an agent-friendly shell with optional [MemPalace](https://github.com/MemPalace/mempalace) AI memory integration.
 
-Get up and running in seconds. RSN DB is a single package with everything baked in.
+**Highlights**
 
-<img src="assets/setup.gif" width="100%" alt="RSN DB Setup">
+- **Performance** — Rust core, zstd compression, optimized indexes
+- **Security** — AES-256-GCM encryption at rest, SHA-256 integrity checks, path guards, DoS limits
+- **Persistence** — Explicit `save()` / `load()` / `snapshot()` with JSON engine snapshots
+- **GraphRAG** — Ingest text and query relationships without an external LLM
+- **Personality modes** — Professional, Friendly, or Snarky CLI feedback (130+ snark lines, mood/vitals in Snarky mode)
+- **AI memory** — Session memory sidecar plus optional official MemPalace bridge
+- **Agent-friendly CLI** — Non-interactive `-c`, `--json`, `--no-prompt` for automation
+
+<img src="assets/setup.gif" width="100%" alt="RSN DB installation">
+
+---
+
+## Installation
 
 ```bash
 pip install rsn_db
 ```
 
----
+**Optional extras**
 
-## Features
+```bash
+# Official MemPalace integration (local-first AI memory)
+pip install 'rsn_db[mempalace]'
 
-- **Safety**: AES-GCM Encryption, Zstd Compression, and SHA-256 Checksums.
-- **CLI**: A powerful REPL with syntax highlighting (simulated) and natural language queries.
-- **GraphRAG**: Built-in knowledge retrieval engine without the LLM overhead.
-- **Speed and Optimization**: Powered by Rust, utilizing `bincode` for O(1) serialization and optimized indexes.
-
----
-
-## Interactive Session
-
-Watch RSN DB in action. Here we use the **Snarky** mode to create a table, insert data, and run a query.
-
-<img src="assets/usage.gif" width="100%" alt="RSN DB Usage">
-
----
-
-## Quickstart
-
-### Python Library
-The library is "all business"—no snark, just performance.
-
-```python
-from rsn_db import Database
-
-# Initialize with encryption
-db = Database(storage_path="data.rsn", encryption_key="super-secret")
-
-# Create a table
-db.create_table("users", {"name": {"type": "string", "required": True}})
-
-# Insert data
-db.insert("users", {"name": "Alice", "age": 30})
-
-# Query data
-results = db.execute_sql("FIND users WHERE age > 20")
-print(results)
+# Development / tests
+pip install 'rsn_db[dev]'
 ```
 
-### CLI
-Just run `rsn` to start the interactive shell.
+Requires **Python 3.9+**.
+### Windows (cmd / PowerShell)
+
+Prebuilt wheels are published for **Windows** (`win_amd64`). Install with:
+
+```powershell
+pip install -U rsn_db
+rsn-db --version
+```
+
+If `pip` appears **stuck at "Building wheel"**, it is compiling Rust from source because no wheel matched your platform/Python. Either:
+
+1. **Upgrade** to the latest version (needs a published Windows wheel): `pip install -U rsn_db`
+2. **Use the alias** after install: `rsn-db` (not `rsn`) if another program owns that name
+3. **Or** install [Rust](https://rustup.rs/) + [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and wait several minutes for the source build to finish
+
+ Prebuilt wheels are published for common Linux targets; other platforms build from source via maturin (Rust toolchain required).
+
+---
+
+## Quick start
+
+### Beginners (recommended)
+
+```python
+from rsn_db.beginners import quick_start, insert_many, records_to_dicts
+from rsn_db import Query
+
+db = quick_start("my_app.rsndb", mode="friendly")
+db.create_table("tasks", {"title": {"type": "string", "required": True}})
+insert_many(db, "tasks", [{"title": "Learn RSN DB"}, {"title": "Ship the release"}])
+print(records_to_dicts(db.query(Query("tasks"))))
+db.save()
+```
+
+### Context manager (auto-save on exit)
+
+```python
+from rsn_db import open_db
+
+with open_db("shop.rsndb") as db:
+    db.create_table("products", {"name": {"type": "string", "required": True}})
+    db.insert("products", {"name": "Widget", "price": 9.99})
+```
+
+### Core API (full control)
+
+```python
+from rsn_db import Database, Query
+
+db = Database(
+    storage_path="data.rsndb",
+    encryption_key="change-me-in-production",
+    compression="zstd",
+    mode="professional",
+)
+
+db.create_table("users", {"name": {"type": "string", "required": True}})
+db.insert("users", {"name": "Alice", "age": 30})
+
+rows = db.query(Query("users").where_eq("name", "Alice"))
+db.save()
+db.snapshot("backup.rsndb")
+```
+
+See [documentation/BEGINNERS.md](documentation/BEGINNERS.md) for a guided walkthrough.
+
+---
+
+## CLI
+
+Two console commands are installed — same program, pick either:
+
+| Command | When to use |
+|---------|-------------|
+| `rsn` | Default on macOS/Linux |
+| `rsn-db` | **Recommended on Windows** if `rsn` conflicts with another tool in cmd/PowerShell |
+
+Interactive shell:
 
 ```bash
 rsn
+# Windows alternative:
+rsn-db
 ```
 
+**Automation / agents**
+
+```bash
+rsn --no-prompt -c "SHOW TABLES"
+rsn-db --mode snarky -c "PULSE"
+rsn-db --storage ./app.rsndb --json -c "COUNT users"
+rsn-db --help
+```
+
+**REPL help** — type `HELP` in the shell for a sorted, described command list (Snarky mode adds random remarks).
+
+**REPL commands** (non-exhaustive)
+
+| Category | Examples |
+|----------|----------|
+| Tables | `SHOW TABLES`, `DESCRIBE users`, `COUNT users` |
+| GraphRAG | `INGEST …`, `GRAPH_QUERY …` |
+| Alive (Snarky) | `PULSE`, `MOOD`, `VITALS`, `ACHIEVEMENT` |
+| MemPalace | `MEMPALACE HELP`, `MEMPALACE SEARCH …`, `MEMPALACE REMEMBER …` |
+| Transactions | `BATCH`, `COMMIT`, `ROLLBACK` |
+
+<img src="assets/usage.gif" width="100%" alt="RSN DB interactive session">
+
 ---
 
-## Security & Safety
+## MemPalace integration
 
-RSN DB is built with a security-first mindset:
-- **Encryption at Rest**: AES-256-GCM for all data.
-- **Integrity**: SHA-256 checksums on every block.
-- **Path Guard**: Blocks absolute paths and directory traversal.
-- **DoS Protection**: Strict limits on batch sizes and recursion depth.
-
----
-
-## GraphRAG (New in v0.2.x)
-
-Ingest unstructured text and query relationships directly.
+RSN DB wraps the **official** [MemPalace/mempalace](https://github.com/MemPalace/mempalace) package (wings → rooms → drawers, ChromaDB, local-first). Install the extra, then:
 
 ```python
-db.ingest("RSN DB was created by a team of caffeinated engineers.", source="engineers_doc")
-print(db.graph_query("Who created RSN DB?"))
+from rsn_db import open_db
+
+with open_db("app.rsndb", mempalace=True) as db:
+    db.remember("User prefers Tuesday deploys")
+    print(db.palace_search("deploy schedule"))
+    db.sync_to_mempalace()
 ```
+
+Use only official sources: [GitHub](https://github.com/MemPalace/mempalace), [PyPI](https://pypi.org/project/mempalace/), [mempalaceofficial.com](https://mempalaceofficial.com).
+
+Details: [documentation/mempalace.md](documentation/mempalace.md)
+
+---
+
+## Session memory
+
+Lightweight JSON sidecar for conversation turns — no extra install:
+
+```python
+from rsn_db import SessionMemory
+
+mem = SessionMemory.for_database("app.rsndb")
+mem.add("user", "Remember: staging uses port 8081")
+mem.add("assistant", "Noted.")
+mem.save()
+```
+
+With MemPalace enabled, `RsnDatabase.sync_to_mempalace()` pushes turns into your palace.
+
+---
+
+## GraphRAG
+
+Ingest unstructured text and query it locally:
+
+```python
+db.ingest("RSN DB was built with Rust and exposed to Python via PyO3.", source="docs")
+print(db.graph_query("What is RSN DB built with?"))
+```
+
+---
+
+## Personality modes
+
+| Mode | Behavior |
+|------|----------|
+| **Professional** | Minimal, neutral output |
+| **Friendly** | Helpful tone with light personality |
+| **Snarky** | Full commentary, 130+ remark pool, mood tracking, ambient `PULSE` / `VITALS` |
+
+Set via Python (`mode="snarky"`), CLI (`--mode snarky`), or saved preference on first run.
+
+---
+
+## Security
+
+RSN DB is designed with a security-first posture:
+
+| Control | Description |
+|---------|-------------|
+| Encryption at rest | AES-256-GCM (optional `encryption_key`) |
+| Integrity | SHA-256 checksums on persisted blocks |
+| Path guard | Blocks absolute paths and directory traversal |
+| DoS limits | Caps on batch size, recursion depth, command length |
+| Safe imports | SQLite/JSON import respects declared schema types |
+
+Full write-up: [documentation/security.md](documentation/security.md) · [documentation/threat_model.md](documentation/threat_model.md)
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [BEGINNERS.md](documentation/BEGINNERS.md) | First-time user guide |
+| [mempalace.md](documentation/mempalace.md) | Official MemPalace bridge |
+| [security.md](documentation/security.md) | Security features and guidance |
+| [threat_model.md](documentation/threat_model.md) | STRIDE threat model |
+| [patchnotes.md](documentation/patchnotes.md) | Version history |
+| [examples/](documentation/examples/) | Usage examples |
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/Enderchefcoder/RSN_DB.git
+cd RSN_DB
+pip install maturin pytest pytest-cov 'mempalace>=3.3.5,<4'
+maturin develop --release
+pytest tests/ --cov=rsn_db --cov-config=pyproject.toml
+cargo clippy -- -W clippy::pedantic
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
 <div align="center">
-  <sub>Built with 🦀 by Enderchefcoder</sub>
+  <sub>Built with Rust and Python · <a href="https://github.com/Enderchefcoder/RSN_DB">GitHub</a> · <a href="https://pypi.org/project/rsn-db/">PyPI</a></sub>
 </div>

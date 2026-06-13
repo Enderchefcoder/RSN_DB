@@ -293,3 +293,24 @@ impl GraphRagEngine {
         response
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ingest_and_query_finds_content() {
+        let mut engine = GraphRagEngine::new();
+        engine.ingest("Alice engineers RSN DB in Rust.", "doc");
+        let out = engine.query("Alice Rust");
+        assert!(out.contains("Alice") || !out.contains("No relevant"));
+    }
+
+    #[test]
+    fn chunk_text_splits_long_input() {
+        let engine = GraphRagEngine::new();
+        let long = "Word. ".repeat(400);
+        let chunks = engine.chunk_text(&long, "src");
+        assert!(!chunks.is_empty());
+    }
+}

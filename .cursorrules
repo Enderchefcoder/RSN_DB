@@ -1,0 +1,21 @@
+# Lessons
+
+## User Specified Lessons
+
+- MemPalace means the **official** PyPI package `mempalace` (github.com/MemPalace/mempalace), not a custom method-of-loci reimplementation in Rust.
+- Official MemPalace sources only: GitHub, PyPI, mempalaceofficial.com — warn about impostor domains.
+- Use `pip install rsn_db[mempalace]` for optional integration; keep core wheel lean.
+
+## Cursor learned
+
+- RSN DB v0.3.0: `MemPalaceBridge`, `RsnDatabase`, `open_db()`, `save`/`load`/`snapshot` on Database.
+
+# Scratchpad
+
+## Task: v0.3.0 + official MemPalace integration
+[X] MemPalace bridge (mempalace_bridge.py)
+[X] Python ease (easy.py, save/load/snapshot)
+[X] Clippy CI + rust tests
+[X] Expanded snark (snark_extra.rs 100+ lines)
+[ ] Build, test, commit, PR
+[ ] PyPI publish — needs user PYPI_API_TOKEN

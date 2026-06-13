@@ -1,5 +1,7 @@
+pub mod alive;
 pub mod graph_rag;
 pub mod personality;
+pub mod snark_pool;
 
 const MAX_RECURSION_DEPTH: usize = 64;
 const MAX_COMMAND_LENGTH: usize = 4096;
@@ -274,6 +276,7 @@ struct Engine {
     tables: HashMap<String, Table>,
     aliases: HashMap<String, String>,
     graph_rag: GraphRagEngine,
+    alive: alive::AliveState,
 }
 
 impl Engine {
@@ -282,6 +285,7 @@ impl Engine {
             tables: HashMap::new(),
             aliases: HashMap::new(),
             graph_rag: GraphRagEngine::new(),
+            alive: alive::AliveState::default(),
         }
     }
     fn rebuild_cache(&mut self) {
@@ -431,7 +435,7 @@ impl Database {
             batch_mode: false,
             batch_ops: Vec::new(),
         };
-        db.load()?;
+        db.reload_from_disk()?;
         Ok(db)
     }
 
@@ -607,7 +611,13 @@ impl Database {
     }
 
     fn execute_sql(&mut self, py: Python<'_>, sql: String) -> PyResult<PyObject> {
-        self.execute_sql_recursive(py, sql, 0)
+        let out = self.execute_sql_recursive(py, sql, 0)?;
+        if let Some(whisper) = self.engine.alive.ambient(self.personality.mode()) {
+            if let Ok(s) = out.extract::<String>(py) {
+                return Ok(format!("{}\n  {}", s, whisper).into_py(py));
+            }
+        }
+        Ok(out)
     }
 
     fn execute_sql_recursive(
@@ -642,6 +652,9 @@ impl Database {
             self.command_history.push(sql.clone());
         }
         let toks: Vec<&str> = sql.split_whitespace().collect();
+        if depth == 0 && !toks.is_empty() {
+            self.engine.alive.on_command();
+        }
         if toks.is_empty() {
             let empty_count = self
                 .command_history
@@ -745,14 +758,37 @@ impl Database {
                 Ok(self.personality.why_mean().into_py(py))
             }
             "ACHIEVEMENT" => Ok(self.personality.achievement_unlocked().into_py(py)),
+            "PULSE" => {
+                self.engine.alive.on_success();
+                Ok(self.engine.alive.pulse(self.personality.mode()).into_py(py))
+            }
+            "MOOD" => {
+                self.engine.alive.on_success();
+                Ok(format!(
+                    "{} (score {})",
+                    self.engine.alive.mood_label(),
+                    self.engine.alive.mood_score
+                )
+                .into_py(py))
+            }
+            "VITALS" => {
+                self.engine.alive.on_success();
+                Ok(self.engine.alive.vitals_json().into_py(py))
+            }
             _ => {
                 if let Some(translated) = self.engine.aliases.get(&toks[0].to_ascii_lowercase()) {
                     return self.execute_sql_recursive(py, translated.clone(), depth + 1);
                 }
                 if toks[0] == "DELTE" {
+                    if depth == 0 {
+                        self.engine.alive.on_error();
+                    }
                     return Err(PyValueError::new_err(
                         self.personality.typo_suggestion("DELTE", "DELETE"),
                     ));
+                }
+                if depth == 0 {
+                    self.engine.alive.on_error();
                 }
                 Err(PyRuntimeError::new_err(
                     self.personality.error("unknown command"),
@@ -946,10 +982,35 @@ impl Database {
         self.persist()?;
         Ok(n)
     }
+
+    fn save(&self) -> PyResult<()> {
+        self.persist()
+    }
+
+    fn load(&mut self) -> PyResult<()> {
+        self.reload_from_disk()
+    }
+
+    fn snapshot(&self, dest: String) -> PyResult<()> {
+        let src = self
+            .storage_path
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("snapshot requires storage_path"))?;
+        if !src.exists() {
+            self.persist()?;
+        }
+        let output_path = sanitize_user_path(&dest)?;
+        let bytes = fs::read(src).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        }
+        fs::write(output_path, bytes).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        Ok(())
+    }
 }
 
 impl Database {
-    fn load(&mut self) -> PyResult<()> {
+    fn reload_from_disk(&mut self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
             if p.exists() {
                 let b = fs::read(p).map_err(|e| PyIOError::new_err(e.to_string()))?;
@@ -979,7 +1040,7 @@ impl Database {
                     }
                     CompressionAlgo::None => {}
                 }
-                self.engine = bincode::deserialize(&data)
+                self.engine = serde_json::from_slice(&data)
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 self.engine.rebuild_cache();
             }
@@ -988,7 +1049,7 @@ impl Database {
     }
     fn persist(&self) -> PyResult<()> {
         if let Some(p) = &self.storage_path {
-            let mut b = bincode::serialize(&self.engine)
+            let mut b = serde_json::to_vec(&self.engine)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
             match self.compression {
                 CompressionAlgo::Zstd => {
@@ -1189,3 +1250,7 @@ fn _core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Record>()?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod lib_tests;

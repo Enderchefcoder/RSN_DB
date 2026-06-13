@@ -1,0 +1,4 @@
+# Stricter Clippy defaults for RSN DB (see .github/workflows/ci.yml)
+cognitive-complexity-threshold = 35
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250
